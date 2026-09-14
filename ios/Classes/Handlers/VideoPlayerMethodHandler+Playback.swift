@@ -49,7 +49,14 @@ extension VideoPlayerView {
         if let args = call.arguments as? [String: Any],
            let milliseconds = args["milliseconds"] as? Int {
             let seconds = Double(milliseconds) / 1000.0
-            player?.seek(to: CMTime(seconds: seconds, preferredTimescale: 1000)) { _ in
+            var target = CMTime(seconds: seconds, preferredTimescale: 1000)
+            if let item = player?.currentItem, item.duration.isIndefinite,
+               let start = item.seekableTimeRanges.first?.timeRangeValue.start {
+                npLog("Original seek target: \(target.seconds) seconds")
+                npLog("Re-anchoring seek target to start of seekable range: \(start.seconds) seconds")
+                target = CMTimeAdd(start, target) // position is window-relative → re-anchor
+            }
+            player?.seek(to: target) { _ in
                 // Texture views must render the seeked frame even while
                 // paused (the engine shows the last copied buffer otherwise)
                 self.textureRenderer?.expectFrame()
