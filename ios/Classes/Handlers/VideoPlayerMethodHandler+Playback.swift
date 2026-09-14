@@ -52,8 +52,6 @@ extension VideoPlayerView {
             var target = CMTime(seconds: seconds, preferredTimescale: 1000)
             if let item = player?.currentItem, item.duration.isIndefinite,
                let start = item.seekableTimeRanges.first?.timeRangeValue.start {
-                npLog("Original seek target: \(target.seconds) seconds")
-                npLog("Re-anchoring seek target to start of seekable range: \(start.seconds) seconds")
                 target = CMTimeAdd(start, target) // position is window-relative → re-anchor
             }
             player?.seek(to: target) { _ in
