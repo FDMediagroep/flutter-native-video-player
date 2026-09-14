@@ -5,6 +5,7 @@ import android.app.Dialog
 import android.content.Context
 import android.content.pm.ActivityInfo
 import android.os.Build
+import android.view.Gravity
 import android.view.SurfaceView
 import android.view.View
 import android.view.ViewGroup
@@ -225,9 +226,13 @@ class VideoPlayerView(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
+            // CENTER matters for the lightweight path: AspectRatioFrameLayout
+            // shrinks itself to the video's aspect ratio, so without it the
+            // letterboxed frame sticks to the top-left of the container.
             addView(videoContentView, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER
             ))
         }
 
@@ -523,7 +528,8 @@ class VideoPlayerView(
         if (videoContentView.parent == null) {
             containerView.addView(videoContentView, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER
             ))
         }
 
