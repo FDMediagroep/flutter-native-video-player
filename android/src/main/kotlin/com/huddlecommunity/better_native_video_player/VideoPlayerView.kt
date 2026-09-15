@@ -5,6 +5,7 @@ import android.app.Dialog
 import android.content.Context
 import android.content.pm.ActivityInfo
 import android.os.Build
+import android.view.Gravity
 import android.view.SurfaceView
 import android.view.View
 import android.view.ViewGroup
@@ -225,9 +226,13 @@ class VideoPlayerView(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
+            // CENTER matters for the lightweight path: AspectRatioFrameLayout
+            // shrinks itself to the video's aspect ratio, so without it the
+            // letterboxed frame sticks to the top-left of the container.
             addView(videoContentView, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER
             ))
         }
 
@@ -426,7 +431,14 @@ class VideoPlayerView(
 
         // Create fullscreen dialog with black background and no title bar
         fullscreenDialog = Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
-            setContentView(videoContentView)
+            // Explicit CENTER: setContentView(View) leaves gravity unspecified,
+            // which FrameLayout treats as TOP|START, so a letterboxed video
+            // (portrait fullscreen) would stick to the top of the screen.
+            setContentView(videoContentView, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER
+            ))
 
             // Handle back button to exit fullscreen
             setOnKeyListener { _, keyCode, event ->
@@ -523,7 +535,8 @@ class VideoPlayerView(
         if (videoContentView.parent == null) {
             containerView.addView(videoContentView, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER
             ))
         }
 
