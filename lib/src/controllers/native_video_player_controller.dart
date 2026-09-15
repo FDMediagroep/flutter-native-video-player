@@ -72,7 +72,8 @@ class NativeVideoPlayerController {
 
     // Set up app lifecycle listener for Android to hide overlay before PiP
     if (!kIsWeb && Platform.isAndroid) {
-      WidgetsBinding.instance.addObserver(_AppLifecycleObserver(this));
+      _lifecycleObserver = _AppLifecycleObserver(this);
+      WidgetsBinding.instance.addObserver(_lifecycleObserver!);
     }
 
     // Set up controller-level event channel for persistent events (PiP, AirPlay)
@@ -138,7 +139,8 @@ class NativeVideoPlayerController {
   /// Whether Picture-in-Picture mode is allowed
   final bool allowsPictureInPicture;
 
-  /// Whether PiP can start automatically when app goes to background (iOS 14.2+)
+  /// Whether PiP can start automatically when the app goes to background
+  /// (iOS 14.2+, Android 12+/API 31)
   final bool canStartPictureInPictureAutomatically;
 
   /// Whether to enable HDR playback (default: false)
@@ -245,6 +247,27 @@ class NativeVideoPlayerController {
 
   /// Floating instance for Android PiP management
   final Floating _floating = Floating();
+
+  _AppLifecycleObserver? _lifecycleObserver;
+
+  /// Whether Android's `autoEnterEnabled` PiP parameter is currently armed.
+  bool _androidAutoPipArmed = false;
+
+  /// The aspect ratio the armed PiP parameters were built with, so they can be
+  /// re-applied once the video's real ratio becomes known.
+  Rational? _androidAutoPipAspectRatio;
+
+  /// Set when the platform rejected auto-enter PiP (API < 31), to stop
+  /// retrying on every playback-state change.
+  bool _androidAutoPipUnsupported = false;
+
+  /// Runtime override of [canStartPictureInPictureAutomatically], driven by
+  /// [enableAutomaticInlinePip] / [disableAutomaticInlinePip].
+  late bool _autoPipEnabled = canStartPictureInPictureAutomatically;
+
+  /// Whether fullscreen was entered by the plugin purely to keep the Android
+  /// PiP window free of surrounding app UI (see [_syncAndroidPipFullscreen]).
+  bool _promotedToFullscreenForPip = false;
 
   /// Set of platform view IDs that are using this controller
   final Set<int> _platformViewIds = <int>{};
@@ -527,6 +550,10 @@ class NativeVideoPlayerController {
       // transition: arm while spinning up / buffering, disarm on any state
       // that proves the pipeline made progress.
       _updateWatchdogs(newState.activityState);
+
+      // Android auto-enter PiP follows playback: armed while playing so a
+      // home press puts the video into PiP, disarmed once it stops.
+      unawaited(_syncAndroidAutoPip());
     }
     // Hand sidecar caption rendering to the native SubtitleView while the
     // Flutter overlay is invisible (Android PiP / native fullscreen) and
@@ -536,8 +563,7 @@ class NativeVideoPlayerController {
       _syncNativeSidecarCaptions(newState);
     }
     if (oldState.isFullScreen != newState.isFullScreen) {
-      // Start/stop polling Android PiP state (PiP is only reachable from
-      // fullscreen on Android).
+      // Start/stop polling Android PiP state.
       _updateAndroidPipPolling(newState);
     }
     if (oldState.currentPosition != newState.currentPosition) {
@@ -557,6 +583,8 @@ class NativeVideoPlayerController {
     if (oldState.isPipEnabled != newState.isPipEnabled) {
       // Suppress oversized native captions while in Android PiP; restore on exit.
       _suppressSubtitlesForPip(newState.isPipEnabled);
+      _updateAndroidPipPolling(newState);
+      _syncAndroidPipFullscreen(newState.isPipEnabled);
       if (!_isPipEnabledController.isClosed) {
         _isPipEnabledController.add(newState.isPipEnabled);
       }
@@ -577,6 +605,8 @@ class NativeVideoPlayerController {
       if (!_qualitiesController.isClosed) {
         _qualitiesController.add(newState.qualities);
       }
+      // Re-arm Android PiP with the video's real aspect ratio once known.
+      unawaited(_syncAndroidAutoPip());
     }
   }
 
@@ -1278,7 +1308,7 @@ class NativeVideoPlayerController {
       }
 
       // Enable automatic PiP on Android if configured
-      await _enableAutomaticPiP();
+      await _syncAndroidAutoPip(force: true);
     }
 
     _emitCurrentState();
@@ -1930,15 +1960,18 @@ class NativeVideoPlayerController {
   /// Unlike iOS (which emits `pipStart`/`pipStop` natively), Android surfaces
   /// no PiP enter/exit callback to the plugin, and the floating package's
   /// status stream starts a 10ms timer it never cancels. We instead poll the
-  /// cheap one-shot [Floating.pipStatus] only while fullscreen — the only
-  /// state from which Android PiP can be entered — and tear it down otherwise.
-  /// Updating the state here lets the existing `_updateState` cascade hide the
-  /// Flutter subtitle overlay, suppress native captions, and emit the stream.
+  /// cheap one-shot [Floating.pipStatus] only while PiP is actually reachable
+  /// — fullscreen, armed auto-enter, or an ongoing PiP session — and tear it
+  /// down otherwise. Updating the state here lets the existing `_updateState`
+  /// cascade hide the Flutter subtitle overlay, suppress native captions, and
+  /// emit the stream.
   void _updateAndroidPipPolling(NativeVideoPlayerState state) {
     if (kIsWeb || !Platform.isAndroid || !allowsPictureInPicture) {
       return;
     }
-    if (state.isFullScreen && _androidPipPollTimer == null) {
+    final bool pipReachable =
+        state.isFullScreen || state.isPipEnabled || _androidAutoPipArmed;
+    if (pipReachable && _androidPipPollTimer == null) {
       Future<void> checkPipStatus() async {
         if (_isDisposed) {
           return;
@@ -1960,13 +1993,9 @@ class NativeVideoPlayerController {
       // First check at t=0 — waiting a full tick leaves [isPipEnabled] stale
       // exactly when lifecycle-transition pause decisions read it.
       unawaited(checkPipStatus());
-    } else if (!state.isFullScreen && _androidPipPollTimer != null) {
+    } else if (!pipReachable && _androidPipPollTimer != null) {
       _androidPipPollTimer!.cancel();
       _androidPipPollTimer = null;
-      // Leaving fullscreen necessarily means leaving PiP; reset the flag.
-      if (_state.isPipEnabled) {
-        _updateState(_state.copyWith(isPipEnabled: false));
-      }
     }
   }
 
@@ -2031,7 +2060,6 @@ class NativeVideoPlayerController {
   /// Returns whether Picture-in-Picture is available on this device
   /// Checks the actual device capabilities rather than just the platform
   /// PiP is available on iOS 14+ and Android 8+ (if the device supports it)
-  /// For Android, also requires the video to be in fullscreen mode
   /// Respects the allowsPictureInPicture setting
   Future<bool> isPictureInPictureAvailable() async {
     // Check if PiP is allowed by controller settings
@@ -2041,10 +2069,6 @@ class NativeVideoPlayerController {
 
     // Use floating package for Android
     if (!kIsWeb && Platform.isAndroid) {
-      // Only available when in fullscreen on Android
-      if (!_state.isFullScreen) {
-        return false;
-      }
       return await _floating.isPipAvailable;
     }
 
@@ -2063,50 +2087,96 @@ class NativeVideoPlayerController {
       // Look for quality with dimensions
       for (final quality in _state.qualities) {
         if (quality.width != null && quality.height != null) {
-          final width = quality.width!;
-          final height = quality.height!;
-          debugPrint(
-            'Using video aspect ratio for PiP: $width:$height (${width / height})',
-          );
-          return Rational(width, height);
+          return Rational(quality.width!, quality.height!);
         }
       }
     }
 
     // Default to 16:9 if we can't determine the aspect ratio
-    debugPrint('Using default 16:9 aspect ratio for PiP');
     return Rational(16, 9);
   }
 
-  /// Enables automatic PiP on Android when app goes to background
-  /// Only enabled when video is in fullscreen
-  Future<void> _enableAutomaticPiP() async {
-    if (!kIsWeb &&
-        Platform.isAndroid &&
-        canStartPictureInPictureAutomatically &&
-        _state.isFullScreen) {
-      try {
-        await _floating.enable(OnLeavePiP(aspectRatio: _getPiPAspectRatio()));
-        debugPrint('Automatic PiP enabled (fullscreen mode)');
-      } catch (e) {
-        debugPrint('Error enabling automatic PiP: $e');
+  /// Arms or disarms Android's automatic Picture-in-Picture
+  /// (`PictureInPictureParams.setAutoEnterEnabled`) — the counterpart of iOS's
+  /// `canStartPictureInPictureAutomaticallyFromInline`. While armed, leaving
+  /// the app (home button or recents gesture) drops the video into PiP, from
+  /// inline playback as well as fullscreen.
+  ///
+  /// The parameter is activity-global, so it is armed only while this player
+  /// is actually playing (or already in PiP) and disarmed as soon as playback
+  /// stops — otherwise any later app-leave would open a PiP window with no
+  /// video in it. Requires Android API 31+.
+  Future<void> _syncAndroidAutoPip({bool force = false}) async {
+    if (kIsWeb || !Platform.isAndroid || _androidAutoPipUnsupported) {
+      return;
+    }
+
+    final bool shouldArm =
+        !_isDisposed &&
+        allowsPictureInPicture &&
+        _autoPipEnabled &&
+        (_state.activityState.isPlaying || _state.isPipEnabled);
+    final Rational? aspectRatio = shouldArm ? _getPiPAspectRatio() : null;
+
+    final bool unchanged =
+        shouldArm == _androidAutoPipArmed &&
+        aspectRatio?.numerator == _androidAutoPipAspectRatio?.numerator &&
+        aspectRatio?.denominator == _androidAutoPipAspectRatio?.denominator;
+    if (unchanged && !force) {
+      return;
+    }
+
+    try {
+      if (shouldArm) {
+        await _floating.enable(OnLeavePiP(aspectRatio: aspectRatio!));
+      } else {
+        await _floating.cancelOnLeavePiP();
       }
+      _androidAutoPipArmed = shouldArm;
+      _androidAutoPipAspectRatio = aspectRatio;
+    } on PlatformException catch (e) {
+      // Android < 12 has no auto-enter parameter; stop retrying.
+      _androidAutoPipUnsupported = true;
+      _androidAutoPipArmed = false;
+      _androidAutoPipAspectRatio = null;
+      debugPrint('Automatic PiP unavailable on this device: ${e.message}');
+    } catch (e) {
+      debugPrint('Error updating automatic PiP: $e');
+    }
+
+    _updateAndroidPipPolling(_state);
+  }
+
+  /// Android mirrors the whole activity window into the PiP tile, so entering
+  /// PiP from an inline player would show the surrounding app UI next to the
+  /// video. Promote to fullscreen for the duration of the PiP session and
+  /// restore the previous layout on exit.
+  void _syncAndroidPipFullscreen(bool inPip) {
+    if (kIsWeb || !Platform.isAndroid) {
+      return;
+    }
+    if (inPip && !_state.isFullScreen) {
+      _promotedToFullscreenForPip = true;
+      unawaited(enterFullScreen());
+    } else if (!inPip && _promotedToFullscreenForPip) {
+      _promotedToFullscreenForPip = false;
+      unawaited(exitFullScreen());
     }
   }
 
   /// Enters Picture-in-Picture mode immediately
   /// Only works on iOS 14+ and Android 8+
-  /// For Android, only works when video is in fullscreen
   Future<bool> enterPictureInPicture() async {
     // Use floating package for Android
     if (!kIsWeb && Platform.isAndroid) {
-      // Only allow PiP when in fullscreen
-      if (!_state.isFullScreen) {
-        debugPrint('PiP requires fullscreen mode on Android');
-        return false;
-      }
-
       try {
+        // Android mirrors the whole activity window, so make the video fill it
+        // before the tile is captured.
+        if (!_state.isFullScreen) {
+          _promotedToFullscreenForPip = true;
+          await enterFullScreen();
+        }
+
         // Emit event to hide overlay before entering PiP
         _emitPipStartedEvent();
 
@@ -2121,6 +2191,9 @@ class NativeVideoPlayerController {
           // Reflect PiP immediately so the subtitle overlay hides without
           // waiting for the next poll tick; the poll then tracks the exit.
           _updateState(_state.copyWith(isPipEnabled: true));
+        } else if (_promotedToFullscreenForPip) {
+          _promotedToFullscreenForPip = false;
+          await exitFullScreen();
         }
         return entered;
       } catch (e) {
@@ -2155,14 +2228,10 @@ class NativeVideoPlayerController {
     // Use floating package for Android
     if (!kIsWeb && Platform.isAndroid) {
       try {
-        // Cancel any OnLeavePiP if it was enabled
-        _floating.cancelOnLeavePiP();
-        // Re-enable automatic PiP if it was originally configured and still in fullscreen
-        if (canStartPictureInPictureAutomatically && _state.isFullScreen) {
-          await _enableAutomaticPiP();
-        }
-        // The floating package doesn't have an explicit disable method
-        // PiP will exit when the activity returns to foreground
+        // Re-apply the auto-enter parameter for the current playback state.
+        // The floating package has no explicit "leave PiP" call; PiP ends when
+        // the activity returns to the foreground.
+        await _syncAndroidAutoPip(force: true);
         return true;
       } catch (e) {
         debugPrint('Error exiting PiP: $e');
@@ -2188,7 +2257,7 @@ class NativeVideoPlayerController {
   ///
   /// **Platform Support:**
   /// - iOS: Requires iOS 14.2+ and video must be playing
-  /// - Android: Requires Android 8+ and video must be in fullscreen
+  /// - Android: Requires Android 12+ (API 31) and video must be playing
   ///
   /// **Returns:**
   /// A Future that completes with true if automatic PiP was successfully enabled
@@ -2209,15 +2278,9 @@ class NativeVideoPlayerController {
     try {
       // Android: enable through floating package
       if (!kIsWeb && Platform.isAndroid) {
-        // Only enable if in fullscreen
-        if (!_state.isFullScreen) {
-          debugPrint(
-            'Cannot enable automatic PiP on Android: video must be in fullscreen',
-          );
-          return false;
-        }
-        await _enableAutomaticPiP();
-        return true;
+        _autoPipEnabled = true;
+        await _syncAndroidAutoPip();
+        return !_androidAutoPipUnsupported;
       }
 
       // iOS: enable through method channel
@@ -2256,8 +2319,8 @@ class NativeVideoPlayerController {
     try {
       // Android: disable through floating package
       if (!kIsWeb && Platform.isAndroid) {
-        _floating.cancelOnLeavePiP();
-        debugPrint('Automatic PiP disabled (Android)');
+        _autoPipEnabled = false;
+        await _syncAndroidAutoPip();
         return true;
       }
 
@@ -2289,10 +2352,10 @@ class NativeVideoPlayerController {
 
     _updateState(_state.copyWith(isFullScreen: true));
 
-    // Enable automatic PiP and refresh availability immediately after entering fullscreen on Android
+    // Refresh availability immediately after entering fullscreen on Android
     // This ensures isPipAvailable is updated before the UI rebuilds
     if (!kIsWeb && Platform.isAndroid) {
-      await _enableAutomaticPiP();
+      await _syncAndroidAutoPip();
       await _refreshAvailabilityFlags();
     }
 
@@ -2328,11 +2391,11 @@ class NativeVideoPlayerController {
 
     _updateState(_state.copyWith(isFullScreen: false));
 
-    // Disable automatic PiP and refresh availability immediately after exiting fullscreen on Android
-    // This ensures isPipAvailable is updated before the UI rebuilds
+    // Re-evaluate auto-enter PiP and refresh availability immediately after
+    // exiting fullscreen on Android. This ensures isPipAvailable is updated
+    // before the UI rebuilds.
     if (!kIsWeb && Platform.isAndroid) {
-      _floating.cancelOnLeavePiP();
-      debugPrint('Automatic PiP disabled (exited fullscreen)');
+      await _syncAndroidAutoPip();
       await _refreshAvailabilityFlags();
     }
 
@@ -2383,13 +2446,12 @@ class NativeVideoPlayerController {
         if (_state.isFullScreen) {
           _updateState(_state.copyWith(isFullScreen: false));
 
-          // Mirror exitFullScreen(): leaving fullscreen must disarm the
-          // activity-global OnLeavePiP, otherwise auto-PiP stays armed for the
-          // rest of the session and any later app-leave enters PiP — even from
-          // inline playback or with no video playing at all.
+          // Mirror exitFullScreen(): auto-enter PiP is activity-global, so it
+          // must be re-evaluated for the now-inline player (it stays armed
+          // while playing, and is disarmed once playback stops).
           if (!kIsWeb && Platform.isAndroid) {
-            _floating.cancelOnLeavePiP();
-            debugPrint('Automatic PiP disabled (fullscreen dialog dismissed)');
+            _promotedToFullscreenForPip = false;
+            unawaited(_syncAndroidAutoPip());
             unawaited(_refreshAvailabilityFlags());
           }
         }
@@ -2615,6 +2677,17 @@ class NativeVideoPlayerController {
     _androidPipPollTimer?.cancel();
     _androidPipPollTimer = null;
 
+    // Disarm activity-global auto-enter PiP and stop observing the lifecycle.
+    if (_lifecycleObserver != null) {
+      WidgetsBinding.instance.removeObserver(_lifecycleObserver!);
+      _lifecycleObserver = null;
+    }
+    if (_androidAutoPipArmed) {
+      _androidAutoPipArmed = false;
+      _androidAutoPipAspectRatio = null;
+      unawaited(_floating.cancelOnLeavePiP());
+    }
+
     // Stop the stalled-playback watchdogs.
     _cancelWatchdogs();
 
@@ -2783,20 +2856,17 @@ class _AppLifecycleObserver with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // When app goes to background and we're in fullscreen with automatic PiP enabled,
-    // hide the overlay before Android captures the screen for PiP
+    // When the app goes to background with auto-enter PiP armed, hide the
+    // overlay before Android captures the window for the PiP tile.
     if (state == AppLifecycleState.inactive &&
-        controller._state.isFullScreen &&
-        controller.canStartPictureInPictureAutomatically) {
+        controller._androidAutoPipArmed) {
       controller._emitPipStartedEvent();
     }
 
-    // When app returns to foreground (after exiting PiP),
-    // re-enable automatic PiP if still in fullscreen
-    if (state == AppLifecycleState.resumed &&
-        controller._state.isFullScreen &&
-        controller.canStartPictureInPictureAutomatically) {
-      controller._enableAutomaticPiP();
+    // When app returns to foreground (after exiting PiP), re-apply the
+    // auto-enter parameter for the current playback state.
+    if (state == AppLifecycleState.resumed) {
+      unawaited(controller._syncAndroidAutoPip(force: true));
     }
   }
 }

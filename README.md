@@ -323,14 +323,23 @@ Add the following to your `Info.plist`:
 
 The plugin automatically configures the required permissions and services in its manifest.
 
-**For Picture-in-Picture support**, Android PiP is handled by the [floating package](https://pub.dev/packages/floating). The integration is automatic - no additional setup required! The floating package provides:
-- Automatic PiP when the home button is pressed (if `canStartPictureInPictureAutomatically` is enabled)
+**For Picture-in-Picture support**, Android PiP is handled by the [floating package](https://pub.dev/packages/floating):
+- Automatic PiP when the home button is pressed or the app is swiped away (if `canStartPictureInPictureAutomatically` is enabled), from inline playback as well as fullscreen — matching iOS
 - Manual PiP entry via `controller.enterPictureInPicture()`
 - Only the video surface is shown in PiP mode (all overlays are hidden)
 
-**Important**: On Android, PiP (both manual and automatic) is **only available when the video is in Dart fullscreen mode** (i.e., when using custom overlay controls with `overlayBuilder`). This ensures only the video player is captured in PiP, not the surrounding app UI.
+**Required**: add `android:supportsPictureInPicture="true"` to your `MainActivity` in `android/app/src/main/AndroidManifest.xml` — a library manifest cannot add this to your activity:
 
-**Note**: PiP requires Android 8.0+ (API 26+) and `android:supportsPictureInPicture="true"` in your Activity manifest (already included by the plugin).
+```xml
+<activity
+    android:name=".MainActivity"
+    android:supportsPictureInPicture="true"
+    android:resizeableActivity="true"
+    android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+    ... />
+```
+
+**Note**: manual PiP requires Android 8.0+ (API 26+); *automatic* PiP on leaving the app requires Android 12+ (API 31+), where `PictureInPictureParams.setAutoEnterEnabled` exists. Because Android mirrors the entire activity window into the PiP tile, the plugin promotes the player to fullscreen for the duration of a PiP session so the surrounding app UI is not captured, and restores the previous layout on exit.
 
 ## Usage
 
@@ -444,7 +453,7 @@ _controller = NativeVideoPlayerController(
 
 #### Picture-in-Picture Configuration
 
-**Note**: On Android, PiP requires the video to be in Dart fullscreen mode (using custom overlay controls). On iOS, PiP works in both normal and fullscreen modes.
+**Note**: PiP works from inline and fullscreen playback on both platforms. On Android the player is temporarily promoted to fullscreen while the PiP window is open, because the system mirrors the whole activity window into the tile.
 
 ```dart
 _controller = NativeVideoPlayerController(
@@ -1261,7 +1270,7 @@ await _controller.load(
 
 #### Picture-in-Picture Mode
 
-**Note**: On Android, PiP is only available when the video is in Dart fullscreen mode (using custom overlay controls). On iOS, PiP works in both normal and fullscreen modes.
+**Note**: PiP works from inline and fullscreen playback on both platforms. Automatic PiP on leaving the app needs iOS 14.2+ / Android 12+ (API 31+).
 
 ```dart
 // Check if PiP is available on the device
@@ -1570,7 +1579,7 @@ class _MultiPlayerScreenState extends State<MultiPlayerScreen> {
 | `enableLooping` | `bool` | `false` | Enable automatic video looping with smooth native playback |
 | `mediaInfo` | `NativeVideoPlayerMediaInfo?` | `null` | Media metadata for Now Playing |
 | `allowsPictureInPicture` | `bool` | `true` | Enable Picture-in-Picture |
-| `canStartPictureInPictureAutomatically` | `bool` | `true` | Auto-start PiP on app background (iOS 14.2+) |
+| `canStartPictureInPictureAutomatically` | `bool` | `true` | Auto-start PiP on app background (iOS 14.2+, Android 12+) |
 | `showNativeControls` | `bool` | `true` | Show native player controls |
 
 ### NativeVideoPlayer Widget
@@ -1867,15 +1876,13 @@ minSdkVersion 24
 - Verify ExoPlayer supports the video format (HLS, MP4, WebM)
 
 **PiP not working:**
-- **Required**: On Android, PiP is only available when the video is in **Dart fullscreen mode** (using custom overlay controls with `overlayBuilder`)
-- Enter fullscreen first before entering PiP: `await controller.enterFullScreen();`
-- PiP requires Android 8.0+ (API 26+)
+- **Required**: `android:supportsPictureInPicture="true"` on your `MainActivity` in `android/app/src/main/AndroidManifest.xml` — the plugin's own manifest cannot add it for you
+- Manual PiP requires Android 8.0+ (API 26+); **automatic PiP on pressing home requires Android 12+ (API 31+)** — `PictureInPictureParams.setAutoEnterEnabled` does not exist below that
 - Check device support: `await controller.isPictureInPictureAvailable()`
-- Android PiP is handled by the [floating package](https://pub.dev/packages/floating) - no MainActivity configuration needed
-- For automatic PiP when pressing home button, set `canStartPictureInPictureAutomatically: true` (default)
+- Android PiP is handled by the [floating package](https://pub.dev/packages/floating) - no MainActivity subclassing needed
+- Automatic PiP is armed only while the video is actually playing (the parameter is activity-global), and is set via `canStartPictureInPictureAutomatically: true` (default)
 - For manual PiP, call `await controller.enterPictureInPicture()`
-- Only the video surface is shown in PiP mode; all overlays are automatically hidden
-- The plugin automatically configures `android:supportsPictureInPicture="true"` in its manifest
+- Only the video surface is shown in PiP mode; overlays are hidden and the player is promoted to fullscreen for the PiP session
 
 **Fullscreen issues:**
 - The plugin handles fullscreen natively using a Dialog on Android
