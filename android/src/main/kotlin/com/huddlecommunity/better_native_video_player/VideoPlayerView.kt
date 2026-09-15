@@ -431,7 +431,14 @@ class VideoPlayerView(
 
         // Create fullscreen dialog with black background and no title bar
         fullscreenDialog = Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
-            setContentView(videoContentView)
+            // Explicit CENTER: setContentView(View) leaves gravity unspecified,
+            // which FrameLayout treats as TOP|START, so a letterboxed video
+            // (portrait fullscreen) would stick to the top of the screen.
+            setContentView(videoContentView, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER
+            ))
 
             // Handle back button to exit fullscreen
             setOnKeyListener { _, keyCode, event ->
