@@ -55,7 +55,7 @@ class NativeVideoPlayerController {
   NativeVideoPlayerController({
     required this.id,
     this.autoPlay = false,
-    this.mediaInfo,
+    NativeVideoPlayerMediaInfo? mediaInfo,
     this.allowsPictureInPicture = true,
     this.canStartPictureInPictureAutomatically = true,
     this.lockToLandscape = true,
@@ -64,7 +64,7 @@ class NativeVideoPlayerController {
     this.showNativeControls = true,
     this.preventFullscreenSwipeDismiss = true,
     List<DeviceOrientation>? preferredOrientations,
-  }) {
+  }) : _mediaInfo = mediaInfo {
     // Set preferred orientations if provided
     if (preferredOrientations != null) {
       FullscreenManager.setPreferredOrientations(preferredOrientations);
@@ -133,7 +133,35 @@ class NativeVideoPlayerController {
   final bool lockToLandscape;
 
   /// Optional media information (title, subtitle, artwork) for Now Playing display
-  final NativeVideoPlayerMediaInfo? mediaInfo;
+  ///
+  /// Use [updateMediaInfo] to change it while a video is playing.
+  NativeVideoPlayerMediaInfo? get mediaInfo => _mediaInfo;
+  NativeVideoPlayerMediaInfo? _mediaInfo;
+
+  /// Replaces the Now Playing / media-notification metadata of the currently
+  /// playing item without interrupting playback.
+  ///
+  /// Useful for live streams where the track changes while the same URL keeps
+  /// playing. The value fully replaces the previous one — fields left `null`
+  /// are cleared on the lock screen and Control Center, so use
+  /// [NativeVideoPlayerMediaInfo.copyWith] to change only part of it:
+  ///
+  /// ```dart
+  /// await controller.updateMediaInfo(
+  ///   controller.mediaInfo!.copyWith(title: nowPlayingSong),
+  /// );
+  /// ```
+  ///
+  /// Safe to call before the platform view exists: the value is stored and
+  /// applied when the player is created.
+  Future<void> updateMediaInfo(NativeVideoPlayerMediaInfo mediaInfo) async {
+    if (_mediaInfo == mediaInfo) {
+      return;
+    }
+
+    _mediaInfo = mediaInfo;
+    await _methodChannel?.setMediaInfo(mediaInfo.toMap());
+  }
 
   /// Whether Picture-in-Picture mode is allowed
   final bool allowsPictureInPicture;

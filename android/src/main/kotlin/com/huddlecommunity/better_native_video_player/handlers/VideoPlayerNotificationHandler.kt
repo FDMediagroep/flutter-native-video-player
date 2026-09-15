@@ -88,6 +88,7 @@ class VideoPlayerNotificationHandler(
     // Store current metadata separately to avoid reading stale data from player
     private var currentTitle: String = "Video"
     private var currentSubtitle: String = ""
+    private var currentAlbum: String = ""
 
     init {
         createNotificationChannel()
@@ -170,7 +171,11 @@ class VideoPlayerNotificationHandler(
         val wasPlaying = player.isPlaying
         val position = player.currentPosition
         player.replaceMediaItem(player.currentMediaItemIndex, updatedItem)
-        player.seekTo(position)
+        // A live stream has no meaningful absolute position to restore — seeking
+        // back after the replace would drop the player off the live edge.
+        if (!player.isCurrentMediaItemLive && player.currentPosition != position) {
+            player.seekTo(position)
+        }
         if (wasPlaying) player.play()
 
         NpLog.d(TAG, "Updated player MediaItem metadata - title: ${mediaInfo["title"]}, subtitle: ${mediaInfo["subtitle"]}")
@@ -185,13 +190,20 @@ class VideoPlayerNotificationHandler(
         // Extract metadata from the provided info
         val newTitle = (mediaInfo?.get("title") as? String) ?: "Video"
         val newSubtitle = (mediaInfo?.get("subtitle") as? String) ?: ""
+        val newAlbum = (mediaInfo?.get("album") as? String) ?: ""
+        val newArtworkUrl = mediaInfo?.get("artworkUrl") as? String
 
         // Check if media info has actually changed to avoid unnecessary updates
-        val mediaInfoChanged = (newTitle != currentTitle || newSubtitle != currentSubtitle)
+        val artworkChanged = newArtworkUrl != currentArtworkUrl
+        val mediaInfoChanged = newTitle != currentTitle ||
+            newSubtitle != currentSubtitle ||
+            newAlbum != currentAlbum ||
+            artworkChanged
 
         // Store the new metadata
         currentTitle = newTitle
         currentSubtitle = newSubtitle
+        currentAlbum = newAlbum
         NpLog.d(TAG, "📱 Media info - title: $currentTitle, subtitle: $currentSubtitle, changed: $mediaInfoChanged")
 
         // If MediaSession already exists, only update if media info changed
@@ -199,8 +211,12 @@ class VideoPlayerNotificationHandler(
             // Only update MediaItem if the info actually changed to avoid playback interruptions
             if (mediaInfoChanged) {
                 NpLog.d(TAG, "📱 MediaSession exists - media info changed, updating metadata")
-                currentArtwork = null // Clear old artwork
-                currentArtworkUrl = null // Clear artwork URL to ignore pending loads
+                // Keep the loaded bitmap when the URL is unchanged, so a
+                // metadata-only refresh doesn't blank the notification artwork.
+                if (artworkChanged) {
+                    currentArtwork = null // Clear old artwork
+                    currentArtworkUrl = null // Clear artwork URL to ignore pending loads
+                }
 
                 // Update the player's MediaItem with the new metadata
                 updatePlayerMediaItemMetadata(mediaInfo)
@@ -212,7 +228,11 @@ class VideoPlayerNotificationHandler(
 
                 // Update notification with new info
                 handler.post {
-                    if (player.playWhenReady) {
+                    // Skip when the notification was already cancelled (ended/idle);
+                    // a paused player still has one posted and must be refreshed.
+                    if (player.playbackState != Player.STATE_IDLE &&
+                        player.playbackState != Player.STATE_ENDED
+                    ) {
                         updateNotification()
                         NpLog.d(TAG, "✅ Notification updated with new media info")
                     }
@@ -372,6 +392,10 @@ class VideoPlayerNotificationHandler(
         // Load artwork asynchronously if present and update the notification
         val artworkUrl = mediaInfo["artworkUrl"] as? String
         if (artworkUrl != null) {
+            if (artworkUrl == currentArtworkUrl && currentArtwork != null) {
+                NpLog.d(TAG, "Artwork unchanged, reusing loaded bitmap for $artworkUrl")
+                return
+            }
             currentArtworkUrl = artworkUrl // Track the current artwork URL
             loadArtwork(artworkUrl) { bitmap ->
                 // Only use this artwork if it's still the current one (prevent race conditions)

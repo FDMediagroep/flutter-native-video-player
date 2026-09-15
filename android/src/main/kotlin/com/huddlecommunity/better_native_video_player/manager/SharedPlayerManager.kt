@@ -36,6 +36,11 @@ object SharedPlayerManager {
     // This ensures qualities persist across view recreations
     private val qualitiesCache = mutableMapOf<Int, List<Map<String, Any>>>()
 
+    // Now Playing metadata for each controller. Shared so every backend of the
+    // same controller sees updates pushed through setMediaInfo — otherwise a
+    // sibling backend would push its stale copy back on the next state change.
+    private val mediaInfoCache = mutableMapOf<Int, Map<String, Any>>()
+
     // Controller-level event sinks (native_video_player_controller_<id>).
     // These persist while all platform views are disposed so controller-scoped
     // events keep flowing after releaseResources(); mirrors the iOS
@@ -183,6 +188,23 @@ object SharedPlayerManager {
     }
 
     /**
+     * Stores the Now Playing metadata for a controller, shared by every
+     * backend using it.
+     */
+    fun setMediaInfo(controllerId: Int, mediaInfo: Map<String, Any>?) {
+        if (mediaInfo == null) {
+            mediaInfoCache.remove(controllerId)
+        } else {
+            mediaInfoCache[controllerId] = mediaInfo
+        }
+    }
+
+    /**
+     * Returns the Now Playing metadata stored for a controller, or null.
+     */
+    fun getMediaInfo(controllerId: Int): Map<String, Any>? = mediaInfoCache[controllerId]
+
+    /**
      * Registers a platform view for a controller
      * The callback will be called when another view using the same controller is disposed
      */
@@ -294,6 +316,9 @@ object SharedPlayerManager {
         // Remove qualities cache
         qualitiesCache.remove(controllerId)
 
+        // Remove media info cache
+        mediaInfoCache.remove(controllerId)
+
         // Clear active views for this controller
         activeViews.remove(controllerId)
 
@@ -319,6 +344,9 @@ object SharedPlayerManager {
 
         // Clear qualities cache
         qualitiesCache.clear()
+
+        // Clear media info cache
+        mediaInfoCache.clear()
 
         // Drop controller-level event sinks (their channels are torn down by
         // the plugin on engine detach)

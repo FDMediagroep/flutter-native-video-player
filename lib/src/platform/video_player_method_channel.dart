@@ -206,6 +206,20 @@ class VideoPlayerMethodChannel {
     }
   }
 
+  /// Replaces the Now Playing / media-notification metadata of the currently
+  /// loaded item without interrupting playback. Keys absent from [mediaInfo]
+  /// clear the corresponding field natively.
+  Future<void> setMediaInfo(Map<String, dynamic> mediaInfo) async {
+    try {
+      await _methodChannel.invokeMethod<void>('setMediaInfo', <String, Object>{
+        'viewId': primaryPlatformViewId,
+        'mediaInfo': mediaInfo,
+      });
+    } catch (e) {
+      debugPrint('Error calling setMediaInfo: $e');
+    }
+  }
+
   /// Sets the playback speed
   Future<void> setSpeed(double speed) async {
     try {
