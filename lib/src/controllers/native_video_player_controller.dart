@@ -259,7 +259,7 @@ class NativeVideoPlayerController {
 
   /// Set when the platform rejected auto-enter PiP (API < 31), to stop
   /// retrying on every playback-state change.
-  bool _androidAutoPipUnsupported = false;
+  bool _androidAutoPipSupported = true;
 
   /// Runtime override of [canStartPictureInPictureAutomatically], driven by
   /// [enableAutomaticInlinePip] / [disableAutomaticInlinePip].
@@ -2107,7 +2107,7 @@ class NativeVideoPlayerController {
   /// stops — otherwise any later app-leave would open a PiP window with no
   /// video in it. Requires Android API 31+.
   Future<void> _syncAndroidAutoPip({bool force = false}) async {
-    if (kIsWeb || !Platform.isAndroid || _androidAutoPipUnsupported) {
+    if (kIsWeb || !Platform.isAndroid || !_androidAutoPipSupported) {
       return;
     }
 
@@ -2136,7 +2136,7 @@ class NativeVideoPlayerController {
       _androidAutoPipAspectRatio = aspectRatio;
     } on PlatformException catch (e) {
       // Android < 12 has no auto-enter parameter; stop retrying.
-      _androidAutoPipUnsupported = true;
+      _androidAutoPipSupported = false;
       _androidAutoPipArmed = false;
       _androidAutoPipAspectRatio = null;
       debugPrint('Automatic PiP unavailable on this device: ${e.message}');
@@ -2280,7 +2280,7 @@ class NativeVideoPlayerController {
       if (!kIsWeb && Platform.isAndroid) {
         _autoPipEnabled = true;
         await _syncAndroidAutoPip();
-        return !_androidAutoPipUnsupported;
+        return _androidAutoPipSupported;
       }
 
       // iOS: enable through method channel
