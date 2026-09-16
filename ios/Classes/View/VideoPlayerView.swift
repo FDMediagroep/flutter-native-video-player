@@ -146,9 +146,9 @@ import QuartzCore
     // it is invoked on every transition to .playing, including after stalls.
     var lastAppliedNowPlayingInfoKey: String?
 
-    // Artwork URL behind the image currently in MPNowPlayingInfoCenter, so a
-    // metadata-only refresh (e.g. the track changed on a live stream) reuses
-    // the loaded image instead of blanking it until the download finishes.
+    // Artwork URL of the image currently in MPNowPlayingInfoCenter, so a
+    // metadata refresh (e.g. the track changed on a live stream) reuses
+    // the loaded image instead of a blank one until the download finishes.
     var lastAppliedArtworkUrl: String?
 
     // Track if this is a shared player (to avoid sending duplicate initialization events)

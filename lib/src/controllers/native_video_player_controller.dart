@@ -141,10 +141,9 @@ class NativeVideoPlayerController {
   /// Replaces the Now Playing / media-notification metadata of the currently
   /// playing item without interrupting playback.
   ///
-  /// Useful for live streams where the track changes while the same URL keeps
-  /// playing. The value fully replaces the previous one — fields left `null`
-  /// are cleared on the lock screen and Control Center, so use
-  /// [NativeVideoPlayerMediaInfo.copyWith] to change only part of it:
+  /// Useful for live streams where the track changes while the same video URL keeps
+  /// playing. Fields left `null` are cleared on the lock screen and Control Center,
+  /// so use [NativeVideoPlayerMediaInfo.copyWith] to only change parts:
   ///
   /// ```dart
   /// await controller.updateMediaInfo(
