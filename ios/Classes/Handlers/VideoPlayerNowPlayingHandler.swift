@@ -1,3 +1,4 @@
+import Flutter
 import MediaPlayer
 import AVFoundation
 
@@ -136,17 +137,32 @@ extension VideoPlayerView {
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = playbackRate
         npLog("   → Playback rate: \(playbackRate)")
 
+        // --- Artwork ---
+        // Carry the current image over when the URL didn't change, so a
+        // metadata-only refresh (live stream track change) doesn't blank the
+        // lock screen artwork while a redundant download runs.
+        let artworkUrlString = mediaInfo["artworkUrl"] as? String
+        let reusableArtwork = artworkUrlString != nil && artworkUrlString == lastAppliedArtworkUrl
+            ? MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPMediaItemPropertyArtwork]
+            : nil
+        if let reusableArtwork = reusableArtwork {
+            nowPlayingInfo[MPMediaItemPropertyArtwork] = reusableArtwork
+        }
+        lastAppliedArtworkUrl = artworkUrlString
+
         // --- Commit initial metadata immediately (before artwork loads) ---
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
         npLog("   → Now Playing info SET to: \(nowPlayingInfo[MPMediaItemPropertyTitle] ?? "Unknown")")
 
         // --- Load artwork asynchronously (if available) ---
-        if let artworkUrlString = mediaInfo["artworkUrl"] as? String,
+        if reusableArtwork == nil,
+           let artworkUrlString = artworkUrlString,
            let artworkUrl = URL(string: artworkUrlString) {
 
             loadArtwork(from: artworkUrl) { [weak self] image in
                 guard let self = self,
-                      let image = image
+                      let image = image,
+                      self.lastAppliedArtworkUrl == artworkUrlString
                 else {
                     return
                 }
@@ -162,6 +178,54 @@ extension VideoPlayerView {
 
         // --- Setup remote commands (if not already done) ---
         setupRemoteCommandCenter()
+    }
+
+    /// Replaces the Now Playing metadata of the currently loaded item
+    /// (`setMediaInfo` from Dart). Keys absent from `mediaInfo` clear the
+    /// corresponding field.
+    func handleSetMediaInfo(call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let arguments = call.arguments as? [String: Any],
+              let mediaInfo = arguments["mediaInfo"] as? [String: Any]
+        else {
+            result(FlutterError(code: "INVALID_MEDIA_INFO", message: "mediaInfo is required", details: nil))
+            return
+        }
+
+        applyUpdatedMediaInfo(mediaInfo)
+        result(nil)
+    }
+
+    /// Stores `mediaInfo` on every view of this controller — any of them may
+    /// refresh Now Playing later (view recreation, PiP, playback resume) and
+    /// would otherwise push the stale metadata back.
+    func applyUpdatedMediaInfo(_ mediaInfo: [String: Any]) {
+        npLog("📱 Updating media info: \(mediaInfo["title"] ?? "Unknown")")
+
+currentMediaInfo = mediaInfo
+        lastAppliedNowPlayingInfoKey = nil
+        if lastAppliedArtworkUrl != (mediaInfo["artworkUrl"] as? String) {
+            lastAppliedArtworkUrl = nil
+        }
+
+        if let controllerIdValue = controllerId {
+            SharedPlayerManager.shared.setMediaInfo(for: controllerIdValue, mediaInfo: mediaInfo)
+
+            for view in SharedPlayerManager.shared.findAllViewsForController(controllerIdValue)
+            where view !== self {
+view.currentMediaInfo = mediaInfo
+                view.lastAppliedNowPlayingInfoKey = nil
+                if view.lastAppliedArtworkUrl != (mediaInfo["artworkUrl"] as? String) {
+                    view.lastAppliedArtworkUrl = nil
+                }
+            }
+        }
+
+        // Only push to Control Center when this view actually drives Now Playing;
+        // an idle player must not hijack another app's lock screen. The stored
+        // info is applied by the observer once playback starts.
+        if RemoteCommandManager.shared.isOwner(viewId) || (player?.rate ?? 0) > 0 {
+            setupNowPlayingInfo(mediaInfo: mediaInfo)
+        }
     }
 
     /// Loads artwork image from URL

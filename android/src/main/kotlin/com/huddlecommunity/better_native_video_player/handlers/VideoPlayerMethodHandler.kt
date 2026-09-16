@@ -210,6 +210,7 @@ class VideoPlayerMethodHandler(
 
         when (call.method) {
             "load" -> handleLoad(call, result)
+            "setMediaInfo" -> handleSetMediaInfo(call, result)
             "setSidecarSubtitles" -> handleSetSidecarSubtitles(call, result)
             "setNativeSidecarActive" -> handleSetNativeSidecarActive(call, result)
             "setSubtitlesSuppressedForPip" -> handleSetSubtitlesSuppressedForPip(call, result)
@@ -235,6 +236,32 @@ class VideoPlayerMethodHandler(
             "dispose" -> handleDispose(result)
             else -> result.notImplemented()
         }
+    }
+
+    /**
+     * Replaces the Now Playing metadata of the currently loaded item without
+     * interrupting playback (e.g. the track changed on a live stream).
+     * Keys absent from `mediaInfo` clear the corresponding field.
+     */
+    private fun handleSetMediaInfo(call: MethodCall, result: MethodChannel.Result) {
+        val args = call.arguments as? Map<*, *>
+        @Suppress("UNCHECKED_CAST")
+        val mediaInfo = args?.get("mediaInfo") as? Map<String, Any>
+
+        if (mediaInfo == null) {
+            result.error("INVALID_MEDIA_INFO", "mediaInfo is required", null)
+            return
+        }
+
+        updateMediaInfo?.invoke(mediaInfo)
+        // Without a loaded item there is nothing to re-tag; the stored info is
+        // applied by the observer once playback starts.
+if (player.currentMediaItem != null) {
+            notificationHandler.setupMediaSession(mediaInfo)
+            lastMediaItem = player.currentMediaItem
+        }
+        NpLog.d(TAG, "📱 Media info updated: ${mediaInfo["title"]}")
+        result.success(null)
     }
 
     /**

@@ -6,6 +6,11 @@
             android:name="com.huddlecommunity.better_native_video_player.VideoPlayerMediaSessionService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <!-- Play/pause button of the media notification on API < 33. -->
+        <receiver
+            android:name="com.huddlecommunity.better_native_video_player.VideoPlayerNotificationActionReceiver"
+            android:exported="false" />
     </application>
 
     <!-- Required for media playback -->

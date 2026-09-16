@@ -52,8 +52,23 @@ class PlayerBackendSession(
     val methodHandler: VideoPlayerMethodHandler
     val observer: VideoPlayerObserver
 
-    var currentMediaInfo: Map<String, Any>? = null
-        private set
+    private var localMediaInfo: Map<String, Any>? = null
+
+    /**
+     * Now Playing metadata for the current item. Backed by [SharedPlayerManager]
+     * for shared controllers so a `setMediaInfo` update reaches every backend —
+     * otherwise a sibling would push its stale copy back on the next state change.
+     */
+    var currentMediaInfo: Map<String, Any>?
+        get() = controllerId?.let { SharedPlayerManager.getMediaInfo(it) } ?: localMediaInfo
+        private set(value) {
+            localMediaInfo = value
+            // Disposal clears the local copy but must not wipe the shared one
+            // while sibling backends are still alive.
+            if (controllerId != null && value != null) {
+                SharedPlayerManager.setMediaInfo(controllerId, value)
+            }
+        }
 
     private val eventChannel: EventChannel
 
