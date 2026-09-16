@@ -212,8 +212,11 @@ currentMediaInfo = mediaInfo
 
             for view in SharedPlayerManager.shared.findAllViewsForController(controllerIdValue)
             where view !== self {
-                view.currentMediaInfo = mediaInfo
+view.currentMediaInfo = mediaInfo
                 view.lastAppliedNowPlayingInfoKey = nil
+                if view.lastAppliedArtworkUrl != (mediaInfo["artworkUrl"] as? String) {
+                    view.lastAppliedArtworkUrl = nil
+                }
             }
         }
 
