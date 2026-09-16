@@ -19,7 +19,6 @@ import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
-import android.support.v4.media.session.MediaSessionCompat
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
@@ -177,8 +176,8 @@ class VideoPlayerNotificationHandler(
         val wasPlaying = player.isPlaying
         val position = player.currentPosition
         player.replaceMediaItem(player.currentMediaItemIndex, updatedItem)
-        // A live stream has no meaningful absolute position to restore — seeking
-        // back after the replace would drop the player off the live edge.
+        // A live stream has no meaningful absolute position to restore.
+        // Seeking back after replacing would drop the player off the live edge.
         if (!player.isCurrentMediaItemLive && player.currentPosition != position) {
             player.seekTo(position)
         }
@@ -217,8 +216,8 @@ class VideoPlayerNotificationHandler(
             // Only update MediaItem if the info actually changed to avoid playback interruptions
             if (mediaInfoChanged) {
                 NpLog.d(TAG, "📱 MediaSession exists - media info changed, updating metadata")
-                // Keep the loaded bitmap when the URL is unchanged, so a
-                // metadata-only refresh doesn't blank the notification artwork.
+                // Keep the current bitmap when the URL is unchanged, so a
+                // metadata update doesn't blank the notification artwork.
                 if (artworkChanged) {
                     currentArtwork = null // Clear old artwork
                     currentArtworkUrl = null // Clear artwork URL to ignore pending loads
@@ -355,7 +354,7 @@ class VideoPlayerNotificationHandler(
 
         // MediaStyle is what turns this into a media notification: System UI then
         // derives the transport controls from the session's PlaybackState
-        // (API 33+) instead of rendering a plain text notification.
+        // (on API 33+) instead of rendering a plain text notification.
         val style = MediaStyleNotificationHelper.MediaStyle(session)
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setContentTitle(title)
@@ -368,8 +367,7 @@ class VideoPlayerNotificationHandler(
             .setShowWhen(false)
 
         // Below API 33 System UI renders the buttons from the notification's actions,
-        // not from the session's PlaybackState, so the play/pause button must be added
-        // explicitly (minSdk is 24).
+        // not from the session's PlaybackState, so we add the play/pause button explicitly.
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             val playing = player.playWhenReady
             builder.addAction(
@@ -408,7 +406,6 @@ class VideoPlayerNotificationHandler(
         val artworkUrl = mediaInfo["artworkUrl"] as? String
         if (artworkUrl != null) {
             if (artworkUrl == currentArtworkUrl && currentArtwork != null) {
-                NpLog.d(TAG, "Artwork unchanged, reusing loaded bitmap for $artworkUrl")
                 return
             }
             currentArtworkUrl = artworkUrl // Track the current artwork URL
@@ -458,15 +455,6 @@ class VideoPlayerNotificationHandler(
                 }
             }
         }
-    }
-
-    /**
-     * Converts Bitmap to ByteArray
-     */
-    private fun bitmapToByteArray(bitmap: Bitmap): ByteArray {
-        val stream = java.io.ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
-        return stream.toByteArray()
     }
 
     /**
