@@ -146,6 +146,11 @@ import QuartzCore
     // it is invoked on every transition to .playing, including after stalls.
     var lastAppliedNowPlayingInfoKey: String?
 
+    // Artwork URL of the image currently in MPNowPlayingInfoCenter, so a
+    // metadata refresh (e.g. the track changed on a live stream) reuses
+    // the loaded image instead of a blank one until the download finishes.
+    var lastAppliedArtworkUrl: String?
+
     // Track if this is a shared player (to avoid sending duplicate initialization events)
     var isSharedPlayer: Bool = false
 
@@ -689,6 +694,8 @@ import QuartzCore
             handleSetSubtitleTrack(call: call, result: result)
         case "setEmbeddedTextScale":
             handleSetEmbeddedTextScale(call: call, result: result)
+        case "setMediaInfo":
+            handleSetMediaInfo(call: call, result: result)
         case "getAvailableAudioTracks":
             handleGetAvailableAudioTracks(result: result)
         case "setAudioTrack":
