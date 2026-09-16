@@ -269,7 +269,6 @@ class VideoPlayerNotificationHandler(
 
         // Add listener to track play/pause events
         player.addListener(playerListener)
-        VideoPlayerNotificationActionReceiver.setPlayPauseCommand(playPauseCommand)
 
         NpLog.d(TAG, "MediaSession created - lock screen and notification controls active")
 
@@ -369,6 +368,10 @@ class VideoPlayerNotificationHandler(
         // Below API 33 System UI renders the buttons from the notification's actions,
         // not from the session's PlaybackState, so we add the play/pause button explicitly.
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            // Handlers share one static receiver/NOTIFICATION_ID, so reassigning on
+            // every build to keep the button targeting whichever session is visible.
+            VideoPlayerNotificationActionReceiver.setPlayPauseCommand(playPauseCommand)
+
             val playing = player.playWhenReady
             builder.addAction(
                 if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
