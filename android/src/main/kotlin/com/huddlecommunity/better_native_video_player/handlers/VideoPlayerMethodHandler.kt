@@ -256,8 +256,9 @@ class VideoPlayerMethodHandler(
         updateMediaInfo?.invoke(mediaInfo)
         // Without a loaded item there is nothing to re-tag; the stored info is
         // applied by the observer once playback starts.
-        if (player.currentMediaItem != null) {
+if (player.currentMediaItem != null) {
             notificationHandler.setupMediaSession(mediaInfo)
+            lastMediaItem = player.currentMediaItem
         }
         NpLog.d(TAG, "📱 Media info updated: ${mediaInfo["title"]}")
         result.success(null)
