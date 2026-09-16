@@ -2,6 +2,7 @@ package com.huddlecommunity.better_native_video_player.handlers
 
 import com.huddlecommunity.better_native_video_player.NpLog
 import com.huddlecommunity.better_native_video_player.VideoPlayerMediaSessionService
+import com.huddlecommunity.better_native_video_player.VideoPlayerNotificationActionReceiver
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -15,14 +16,14 @@ import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.support.v4.media.session.MediaSessionCompat
 import androidx.core.app.NotificationCompat
-import androidx.media.app.NotificationCompat as MediaNotificationCompat
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
+import android.support.v4.media.session.MediaSessionCompat
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
-import androidx.media3.session.SessionToken
+import androidx.media3.session.MediaStyleNotificationHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -33,6 +34,7 @@ import java.net.URL
  * Handles MediaSession and notification controls for lock screen and notification area
  * Equivalent to iOS VideoPlayerNowPlayingHandler
  */
+@UnstableApi
 class VideoPlayerNotificationHandler(
     private val context: Context,
     private val player: ExoPlayer,
@@ -92,6 +94,10 @@ class VideoPlayerNotificationHandler(
 
     init {
         createNotificationChannel()
+    }
+
+    private val playPauseCommand: (Boolean) -> Unit = { play ->
+        if (play) player.play() else player.pause()
     }
 
     private val playerListener = object : Player.Listener {
@@ -264,6 +270,7 @@ class VideoPlayerNotificationHandler(
 
         // Add listener to track play/pause events
         player.addListener(playerListener)
+        VideoPlayerNotificationActionReceiver.setPlayPauseCommand(playPauseCommand)
 
         NpLog.d(TAG, "MediaSession created - lock screen and notification controls active")
 
@@ -346,18 +353,10 @@ class VideoPlayerNotificationHandler(
 
         val iconResId = resolveSmallIconRes()
 
-        // Convert Media3 SessionToken to MediaSessionCompat.Token for notification
-        // Media3 1.4.0+ requires us to extract the token differently
-        val token = try {
-            // Use reflection to access the session compat token
-            val method = session.javaClass.getMethod("getSessionCompatToken")
-            method.invoke(session) as? MediaSessionCompat.Token
-        } catch (e: Exception) {
-            // If reflection fails (Media3 1.4.0+), create a token from the session's underlying binder
-            NpLog.w(TAG, "getSessionCompatToken not available, using alternative method")
-            null
-        }
-
+        // MediaStyle is what turns this into a media notification: System UI then
+        // derives the transport controls from the session's PlaybackState
+        // (API 33+) instead of rendering a plain text notification.
+        val style = MediaStyleNotificationHelper.MediaStyle(session)
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(artist)
@@ -368,19 +367,35 @@ class VideoPlayerNotificationHandler(
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
 
-        // Only set media session token if we successfully obtained it
-        if (token != null) {
-            builder.setStyle(
-                MediaNotificationCompat.MediaStyle()
-                    .setMediaSession(token)
+        // Below API 33 System UI renders the buttons from the notification's actions,
+        // not from the session's PlaybackState, so the play/pause button must be added
+        // explicitly (minSdk is 24).
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            val playing = player.playWhenReady
+            builder.addAction(
+                if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+                if (playing) "Pause" else "Play",
+                playPauseIntent(play = !playing)
             )
-        } else {
-            // Fallback: create notification without media session integration
-            // Controls will still work through MediaSession, just not integrated in notification
-            NpLog.w(TAG, "Creating notification without MediaSession token integration")
+            style.setShowActionsInCompactView(0)
         }
 
-        return builder.build()
+        return builder.setStyle(style).build()
+    }
+
+    private fun playPauseIntent(play: Boolean): PendingIntent {
+        val action = if (play) {
+            VideoPlayerNotificationActionReceiver.ACTION_PLAY
+        } else {
+            VideoPlayerNotificationActionReceiver.ACTION_PAUSE
+        }
+        val intent = Intent(context, VideoPlayerNotificationActionReceiver::class.java).setAction(action)
+        return PendingIntent.getBroadcast(
+            context,
+            if (play) 1 else 2,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
     }
 
     /**
@@ -481,6 +496,7 @@ class VideoPlayerNotificationHandler(
     fun release() {
         stopPositionUpdates()
         player.removeListener(playerListener)
+        VideoPlayerNotificationActionReceiver.clearPlayPauseCommand(playPauseCommand)
         VideoPlayerMediaSessionService.stop(context, removeNotification = true)
         hideNotification()
 
