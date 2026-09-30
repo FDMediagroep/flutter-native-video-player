@@ -352,23 +352,6 @@ extension _ControllerEventPlumbing on NativeVideoPlayerController {
             if (isActivityEvent) {
               final activityEvent = PlayerActivityEvent.fromMap(map);
 
-              // Complete initialization when we receive the isInitialized event
-              // OR if method channel exists and we have platform views
-              if ((!_state.activityState.isInitialized &&
-                      activityEvent.state == PlayerActivityState.initialized &&
-                      _initializeCompleter != null &&
-                      !_initializeCompleter!.isCompleted) ||
-                  (_methodChannel != null &&
-                      _platformViewIds.isNotEmpty &&
-                      !_isInitialized)) {
-                _isInitialized = true;
-                if (_initializeCompleter != null &&
-                    !_initializeCompleter!.isCompleted) {
-                  _initializeCompleter!.complete();
-                }
-                _isInitializing = false;
-              }
-
               // Update the last non-buffering state when we receive play/pause events
               // This ensures we can restore to the correct state after buffering
               if (activityEvent.state == PlayerActivityState.playing ||
@@ -579,7 +562,10 @@ extension _ControllerEventPlumbing on NativeVideoPlayerController {
             if (!_state.activityState.isInitialized &&
                 _initializeCompleter != null &&
                 !_initializeCompleter!.isCompleted) {
-              _initializeCompleter!.completeError(error);
+              final completer = _initializeCompleter!;
+              _initializeCompleter = null;
+              _isInitializing = false;
+              completer.completeError(error);
             }
           },
         );
