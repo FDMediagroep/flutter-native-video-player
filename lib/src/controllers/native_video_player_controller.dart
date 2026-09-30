@@ -79,48 +79,52 @@ class NativeVideoPlayerController {
     _controllerChannelSetupFuture = _setupControllerEventChannel();
   }
 
-  /// Initialize the controller and wait for the platform view to be created
+  /// Initialize the controller and wait for a platform view to be attached.
+  ///
+  /// After all views were disposed (or [releaseResources] was called) this
+  /// waits again for the next view, so commands never target a gone view.
   Future<void> initialize() async {
-    if (_isInitialized) {
+    if (_isInitialized || _isDisposed) {
       return;
     }
 
-    // If already initializing, wait for the existing initialization to complete
-    if (_isInitializing && _initializeCompleter != null) {
-      await _initializeCompleter!.future;
-      return;
+    final completer = _initializeCompleter ??= Completer<void>();
+    if (!_isInitializing) {
+      _isInitializing = true;
+      if (!_hasMedia) {
+        _updateState(
+          _state.copyWith(activityState: PlayerActivityState.initializing),
+        );
+      }
     }
 
-    // If platform view is already created and method channel exists, mark as initialized immediately
-    if (_methodChannel != null && _platformViewIds.isNotEmpty) {
-      _isInitialized = true;
+    await completer.future;
+  }
+
+  /// Whether the (shared) native player already holds media; re-attaching a
+  /// view must then not reset the activity state.
+  bool get _hasMedia => switch (_state.activityState) {
+    PlayerActivityState.idle ||
+    PlayerActivityState.initializing ||
+    PlayerActivityState.initialized ||
+    PlayerActivityState.error => false,
+    _ => true,
+  };
+
+  /// Marks the controller initialized and releases pending [initialize] calls.
+  void _completeInitialization() {
+    _isInitialized = true;
+    _isInitializing = false;
+    if (!_hasMedia) {
       _updateState(
         _state.copyWith(activityState: PlayerActivityState.initialized),
       );
-      return;
     }
-
-    // Mark as initializing
-    _isInitializing = true;
-
-    // Set state to initializing immediately
-    _updateState(
-      _state.copyWith(activityState: PlayerActivityState.initializing),
-    );
-
-    // Create a completer that will be completed when the platform view is created
-    _initializeCompleter = Completer<void>();
-
-    // Wait for the platform view to be created
-    await _initializeCompleter!.future;
-
-    // Mark as initialized
-    _isInitialized = true;
-    _isInitializing = false;
-
-    _updateState(
-      _state.copyWith(activityState: PlayerActivityState.initialized),
-    );
+    final completer = _initializeCompleter;
+    _initializeCompleter = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete();
+    }
   }
 
   /// Unique identifier for this video player instance
@@ -1281,6 +1285,12 @@ class NativeVideoPlayerController {
       await _enableAutomaticPiP();
     }
 
+    // Only after the surface reconnected; skip if the view vanished meanwhile.
+    if (!_isDisposed && !_isInitialized &&
+        _platformViewIds.contains(platformViewId)) {
+      _completeInitialization();
+    }
+
     _emitCurrentState();
 
     // ALWAYS notify all event handler listeners about the current state
@@ -1431,6 +1441,10 @@ class NativeVideoPlayerController {
       // Use the most recent remaining view
       final newPrimaryViewId = _platformViewIds.last;
       _updateMethodChannel(newPrimaryViewId);
+    } else if (_platformViewIds.isEmpty) {
+      // Keep _methodChannel: a releaseResources() pause right after unmount
+      // must still reach the native view while its teardown is pending.
+      _isInitialized = false;
     }
   }
 
@@ -2574,7 +2588,8 @@ class NativeVideoPlayerController {
 
     // Clear method channel reference (but don't dispose native player)
     _methodChannel = null;
-    _initializeCompleter = null;
+    // Pending initialize() calls stay pending until the next view attaches.
+    _isInitialized = false;
 
     // Clear fullscreen callback (but keep overlay builder)
     _dartFullscreenCloseCallback = null;
@@ -2740,7 +2755,14 @@ class NativeVideoPlayerController {
     // Clear other state
     _methodChannel = null;
     _url = null;
+
+    // Don't leave initialize() callers hanging forever.
+    final initializeCompleter = _initializeCompleter;
     _initializeCompleter = null;
+    _isInitializing = false;
+    if (initializeCompleter != null && !initializeCompleter.isCompleted) {
+      initializeCompleter.complete();
+    }
   }
 
   /// Internal method to emit pipStarted event (hides overlay before PiP)

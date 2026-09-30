@@ -361,12 +361,7 @@ extension _ControllerEventPlumbing on NativeVideoPlayerController {
                   (_methodChannel != null &&
                       _platformViewIds.isNotEmpty &&
                       !_isInitialized)) {
-                _isInitialized = true;
-                if (_initializeCompleter != null &&
-                    !_initializeCompleter!.isCompleted) {
-                  _initializeCompleter!.complete();
-                }
-                _isInitializing = false;
+                _completeInitialization();
               }
 
               // Update the last non-buffering state when we receive play/pause events
@@ -579,7 +574,10 @@ extension _ControllerEventPlumbing on NativeVideoPlayerController {
             if (!_state.activityState.isInitialized &&
                 _initializeCompleter != null &&
                 !_initializeCompleter!.isCompleted) {
-              _initializeCompleter!.completeError(error);
+              final completer = _initializeCompleter!;
+              _initializeCompleter = null;
+              _isInitializing = false;
+              completer.completeError(error);
             }
           },
         );
