@@ -1220,9 +1220,7 @@ class NativeVideoPlayerController {
 
     if (style.embeddedTextScale != _embeddedTextScale) {
       _embeddedTextScale = style.embeddedTextScale;
-      unawaited(
-        _methodChannel?.setEmbeddedTextScale(style.embeddedTextScale),
-      );
+      unawaited(_methodChannel?.setEmbeddedTextScale(style.embeddedTextScale));
     }
   }
 
@@ -1245,7 +1243,7 @@ class NativeVideoPlayerController {
     BuildContext context,
   ) async {
     // True after all views were disposed, and also when an earlier attach
-    // failed to reconnect (that view may still be registered).
+    // failed to reconnect.
     final bool needsReconnect = !_isInitialized;
 
     _platformViewIds.add(platformViewId);
@@ -1260,10 +1258,33 @@ class NativeVideoPlayerController {
     // Ask native to reconnect surface for this view (Android reconnects ExoPlayer surface;
     // iOS no-ops). Ensures video shows when returning from detail to inline (list→detail→back).
     final bool reconnected =
-        !needsReconnect || _methodChannel != null && await _methodChannel!.ensureSurfaceConnected();
+        !needsReconnect ||
+        _methodChannel != null &&
+            await _methodChannel!.ensureSurfaceConnected();
+
+    // Native can't reach this view: unregister it so neither commands nor
+    // primary promotion (onPlatformViewDisposed) can target it.
+    if (!reconnected) {
+      _platformViewIds.remove(platformViewId);
+      _platformViewContexts.remove(platformViewId);
+      _textureViewIds.remove(platformViewId);
+      if (_primaryPlatformViewId == platformViewId) {
+        if (_platformViewIds.isNotEmpty) {
+          _updateMethodChannel(_platformViewIds.last);
+        } else {
+          final channel = _methodChannel;
+          if (channel != null) {
+            AirPlayStateManager.instance.unregisterMethodChannel(channel);
+          }
+          _methodChannel = null;
+          _primaryPlatformViewId = null;
+        }
+      }
+      return;
+    }
 
     // If we're reconnecting after all platform views were disposed, refresh availability flags
-    if (needsReconnect && reconnected) {
+    if (needsReconnect) {
       // Re-apply the embedded caption text scale — the recreated native view
       // builds its SubtitleView with the platform default size.
       if (_embeddedTextScale != 1.0 && _methodChannel != null) {
@@ -1285,10 +1306,8 @@ class NativeVideoPlayerController {
       await _enableAutomaticPiP();
     }
 
-    // Only after the surface reconnected; otherwise keep waiting for another
-    // attach. Skip if the view vanished meanwhile.
-    if (reconnected &&
-        !_isDisposed &&
+    // Skip if the view vanished meanwhile.
+    if (!_isDisposed &&
         !_isInitialized &&
         _platformViewIds.contains(platformViewId)) {
       _completeInitialization();

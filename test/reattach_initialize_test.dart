@@ -41,33 +41,34 @@ void main() {
     return tester.element(find.byType(SizedBox));
   }
 
-  testWidgets('initialize waits for a new view after the last one is disposed', (
-    tester,
-  ) async {
-    final context = await contextFor(tester);
-    await controller.onPlatformViewCreated(1, context);
-    await controller.initialize();
-    await controller.load(url: 'https://example.com/a.m3u8');
+  testWidgets(
+    'initialize waits for a new view after the last one is disposed',
+    (tester) async {
+      final context = await contextFor(tester);
+      await controller.onPlatformViewCreated(1, context);
+      await controller.initialize();
+      await controller.load(url: 'https://example.com/a.m3u8');
 
-    controller.onPlatformViewDisposed(1);
-    expect(controller.isInitialized, isFalse);
-    expect(
-      () => controller.load(url: 'https://example.com/b.m3u8', force: true),
-      throwsException,
-    );
+      controller.onPlatformViewDisposed(1);
+      expect(controller.isInitialized, isFalse);
+      expect(
+        () => controller.load(url: 'https://example.com/b.m3u8', force: true),
+        throwsException,
+      );
 
-    var initialized = false;
-    final pending = controller.initialize().then((_) => initialized = true);
-    await tester.pump();
-    expect(initialized, isFalse);
+      var initialized = false;
+      final pending = controller.initialize().then((_) => initialized = true);
+      await tester.pump();
+      expect(initialized, isFalse);
 
-    await controller.onPlatformViewCreated(2, context);
-    await pending;
-    expect(controller.isInitialized, isTrue);
-    // Re-attaching to the shared player keeps its media state.
-    expect(controller.activityState, PlayerActivityState.loaded);
-    await tester.pump(const Duration(milliseconds: 100));
-  });
+      await controller.onPlatformViewCreated(2, context);
+      await pending;
+      expect(controller.isInitialized, isTrue);
+      // Re-attaching to the shared player keeps its media state.
+      expect(controller.activityState, PlayerActivityState.loaded);
+      await tester.pump(const Duration(milliseconds: 100));
+    },
+  );
 
   testWidgets('pending initialize survives releaseResources', (tester) async {
     final context = await contextFor(tester);
@@ -127,8 +128,7 @@ void main() {
     expect(initialized, isFalse);
     expect(controller.isInitialized, isFalse);
 
-    // The next attach retries the reconnect even though view 1 is still
-    // registered.
+    // The next attach retries the reconnect.
     await controller.onPlatformViewCreated(2, context);
     await pending;
     expect(controller.isInitialized, isTrue);
@@ -167,6 +167,45 @@ void main() {
     await controller.onPlatformViewCreated(2, context);
     await pending;
     expect(controller.isInitialized, isTrue);
+    await tester.pump(const Duration(milliseconds: 100));
+  });
+
+  testWidgets('a failed attach is never targeted by commands or promoted', (
+    tester,
+  ) async {
+    final context = await contextFor(tester);
+    final view1Calls = <String>[];
+    messenger.setMockMethodCallHandler(methodChannel, (call) async {
+      final args = call.arguments;
+      if (args is Map && args['viewId'] == 1) {
+        view1Calls.add(call.method);
+        if (call.method == 'ensureSurfaceConnected') {
+          throw PlatformException(code: 'NO_VIEW');
+        }
+      }
+      return null;
+    });
+
+    await controller.onPlatformViewCreated(1, context);
+    await expectLater(
+      controller.load(url: 'https://example.com/a.m3u8'),
+      throwsException,
+    );
+    await controller.play();
+
+    await controller.onPlatformViewCreated(2, context);
+    expect(controller.isInitialized, isTrue);
+
+    // View 1 must not be promoted when the only connected view goes away.
+    controller.onPlatformViewDisposed(2);
+    expect(controller.isInitialized, isFalse);
+    await expectLater(
+      controller.load(url: 'https://example.com/a.m3u8'),
+      throwsException,
+    );
+    await controller.play();
+
+    expect(view1Calls, ['ensureSurfaceConnected']);
     await tester.pump(const Duration(milliseconds: 100));
   });
 
