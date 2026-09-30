@@ -105,6 +105,36 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
   });
 
+  testWidgets('a failed surface reconnect keeps initialize pending', (
+    tester,
+  ) async {
+    final context = await contextFor(tester);
+    messenger.setMockMethodCallHandler(methodChannel, (call) async {
+      final args = call.arguments;
+      if (call.method == 'ensureSurfaceConnected' &&
+          args is Map &&
+          args['viewId'] == 1) {
+        throw PlatformException(code: 'NO_VIEW');
+      }
+      return null;
+    });
+
+    var initialized = false;
+    final pending = controller.initialize().then((_) => initialized = true);
+
+    await controller.onPlatformViewCreated(1, context);
+    await tester.pump();
+    expect(initialized, isFalse);
+    expect(controller.isInitialized, isFalse);
+
+    // The next attach retries the reconnect even though view 1 is still
+    // registered.
+    await controller.onPlatformViewCreated(2, context);
+    await pending;
+    expect(controller.isInitialized, isTrue);
+    await tester.pump(const Duration(milliseconds: 100));
+  });
+
   test('dispose releases a pending initialize', () async {
     var initialized = false;
     final pending = controller.initialize().then((_) => initialized = true);

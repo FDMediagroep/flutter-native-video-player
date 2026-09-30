@@ -1244,8 +1244,9 @@ class NativeVideoPlayerController {
     int platformViewId,
     BuildContext context,
   ) async {
-    // Check if we're reconnecting BEFORE adding the new view ID
-    final bool wasDisconnected = _platformViewIds.isEmpty;
+    // True after all views were disposed, and also when an earlier attach
+    // failed to reconnect (that view may still be registered).
+    final bool needsReconnect = !_isInitialized;
 
     _platformViewIds.add(platformViewId);
 
@@ -1256,14 +1257,13 @@ class NativeVideoPlayerController {
     // This ensures commands go to the active view
     _updateMethodChannel(platformViewId);
 
-    // If we're reconnecting after all platform views were disposed, refresh availability flags
-    if (wasDisconnected) {
-      // Ask native to reconnect surface for this view (Android reconnects ExoPlayer surface;
-      // iOS no-ops). Ensures video shows when returning from detail to inline (list→detail→back).
-      if (_methodChannel != null) {
-        await _methodChannel!.ensureSurfaceConnected();
-      }
+    // Ask native to reconnect surface for this view (Android reconnects ExoPlayer surface;
+    // iOS no-ops). Ensures video shows when returning from detail to inline (list→detail→back).
+    final bool reconnected =
+        !needsReconnect || _methodChannel != null && await _methodChannel!.ensureSurfaceConnected();
 
+    // If we're reconnecting after all platform views were disposed, refresh availability flags
+    if (needsReconnect && reconnected) {
       // Re-apply the embedded caption text scale — the recreated native view
       // builds its SubtitleView with the platform default size.
       if (_embeddedTextScale != 1.0 && _methodChannel != null) {
@@ -1285,8 +1285,11 @@ class NativeVideoPlayerController {
       await _enableAutomaticPiP();
     }
 
-    // Only after the surface reconnected; skip if the view vanished meanwhile.
-    if (!_isDisposed && !_isInitialized &&
+    // Only after the surface reconnected; otherwise keep waiting for another
+    // attach. Skip if the view vanished meanwhile.
+    if (reconnected &&
+        !_isDisposed &&
+        !_isInitialized &&
         _platformViewIds.contains(platformViewId)) {
       _completeInitialization();
     }

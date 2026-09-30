@@ -530,14 +530,17 @@ class VideoPlayerMethodChannel {
 
   /// Asks the native side to ensure the player surface is connected to this view.
   /// Called when reconnecting after all platform views were disposed (e.g. list→detail→back).
-  Future<void> ensureSurfaceConnected() async {
+  /// Returns false if the native side could not reach the view (e.g. `NO_VIEW`).
+  Future<bool> ensureSurfaceConnected() async {
     try {
       await _methodChannel.invokeMethod<void>(
         'ensureSurfaceConnected',
         <String, Object>{'viewId': primaryPlatformViewId},
       );
+      return true;
     } catch (e) {
       debugPrint('Error calling ensureSurfaceConnected: $e');
+      return false;
     }
   }
 
