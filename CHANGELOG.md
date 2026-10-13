@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `loaded`. Android sends no further play event, so the state read `loaded`
   for seconds while the video played.
 
+### Changed
+- **Android: the plugin's native classes are per Flutter engine.**
+  `SharedPlayerManager` is no longer a process-wide `object` but one instance
+  per plugin (engine), and the constructors of the internal view, backend
+  and handler classes changed. The Dart API is unchanged; only app code
+  that called these native internals directly (for example
+  `SharedPlayerManager.clearAll` from a `MainActivity`) needs updating.
+
 ## [1.6.2] - 2026-09-29
 
 ### Added
