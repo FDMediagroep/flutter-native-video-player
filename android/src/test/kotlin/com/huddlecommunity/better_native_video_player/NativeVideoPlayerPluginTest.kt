@@ -2,10 +2,12 @@ package com.huddlecommunity.better_native_video_player
 
 import android.content.Context
 import android.os.Looper
+import androidx.media3.exoplayer.ExoPlayer
 import com.huddlecommunity.better_native_video_player.manager.SharedPlayerManager
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.FlutterException
+import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.StandardMethodCodec
 import io.flutter.plugin.platform.PlatformViewRegistry
@@ -31,7 +33,8 @@ class NativeVideoPlayerPluginTest {
     private val controllerChannel = "native_video_player_controller_1"
 
     private class Engine {
-        val plugin = NativeVideoPlayerPlugin()
+        val manager = Mockito.spy(SharedPlayerManager())
+        val plugin = NativeVideoPlayerPlugin(manager)
         val messenger = Mockito.mock(BinaryMessenger::class.java)
         val binding = Mockito.mock(FlutterPlugin.FlutterPluginBinding::class.java)
         val handlers = mutableMapOf<String, BinaryMessenger.BinaryMessageHandler?>()
@@ -110,7 +113,7 @@ class NativeVideoPlayerPluginTest {
 
         background.detach()
         engines.remove(background)
-        SharedPlayerManager.sendControllerEvent(1, "pipStarted")
+        main.manager.sendControllerEvent(1, "pipStarted")
         shadowOf(Looper.getMainLooper()).idle()
 
         assertNotNull(main.handlers[controllerChannel])
@@ -137,4 +140,82 @@ class NativeVideoPlayerPluginTest {
         main.setup()
         assertNotNull(main.handlers[controllerChannel])
     }
+
+    @Test
+    fun laterBackgroundListenerDoesNotReplaceMainEngineSink() {
+        val main = attach()
+        val background = attach()
+        main.setup()
+        main.call(controllerChannel, "listen", null)
+        background.setup()
+        background.call(controllerChannel, "listen", null)
+
+        main.manager.sendControllerEvent(1, "pipStarted")
+        shadowOf(Looper.getMainLooper()).idle()
+
+        Mockito.verify(main.messenger).send(
+            ArgumentMatchers.eq(controllerChannel),
+            ArgumentMatchers.any(ByteBuffer::class.java)
+        )
+        Mockito.verify(background.messenger, Mockito.never()).send(
+            ArgumentMatchers.eq(controllerChannel),
+            ArgumentMatchers.any(ByteBuffer::class.java)
+        )
+        background.manager.sendControllerEvent(1, "pipStopped")
+        shadowOf(Looper.getMainLooper()).idle()
+        Mockito.verify(background.messenger).send(
+            ArgumentMatchers.eq(controllerChannel),
+            ArgumentMatchers.any(ByteBuffer::class.java)
+        )
+    }
+
+    @Test
+    fun mainEngineDetachReleasesOnlyItsPlayersWhileBackgroundRemainsAttached() {
+        val main = attach()
+        val background = attach()
+        val context: Context = RuntimeEnvironment.getApplication()
+        val mainPlayer = Mockito.mock(ExoPlayer::class.java)
+        val backgroundPlayer = Mockito.mock(ExoPlayer::class.java)
+        Mockito.doReturn(mainPlayer).`when`(main.manager).buildPlayer(context, null, false, false)
+        Mockito.doReturn(backgroundPlayer).`when`(background.manager).buildPlayer(context, null, false, false)
+        assertEquals(mainPlayer, main.manager.getOrCreatePlayer(context, 1).first)
+        assertEquals(backgroundPlayer, background.manager.getOrCreatePlayer(context, 1).first)
+
+        main.detach()
+        engines.remove(main)
+
+        Mockito.verify(mainPlayer).release()
+        Mockito.verify(backgroundPlayer, Mockito.never()).release()
+        assertEquals(backgroundPlayer, background.manager.getOrCreatePlayer(context, 1).first)
+    }
+
+
+    @Test
+    fun matchingViewIdsRouteAndDisposeOnlyWithinTheirEngine() {
+        val main = attach()
+        val background = attach()
+        val mainView = Mockito.mock(VideoPlayerBackend::class.java)
+        val backgroundView = Mockito.mock(VideoPlayerBackend::class.java)
+        Mockito.doAnswer { invocation ->
+            invocation.getArgument<MethodChannel.Result>(1).success(null)
+            null
+        }.`when`(mainView).handleMethodCall(
+            ArgumentMatchers.any(MethodCall::class.java),
+            ArgumentMatchers.any(MethodChannel.Result::class.java)
+        )
+        NativeVideoPlayerPlugin.registerView(main.messenger, mainView, 42L)
+        NativeVideoPlayerPlugin.registerView(background.messenger, backgroundView, 42L)
+
+        main.call("native_video_player", "pause", mapOf("viewId" to 42))
+        main.detach()
+        engines.remove(main)
+
+        Mockito.verify(mainView).handleMethodCall(
+            ArgumentMatchers.any(MethodCall::class.java),
+            ArgumentMatchers.any(MethodChannel.Result::class.java)
+        )
+        Mockito.verify(mainView).dispose()
+        Mockito.verifyNoInteractions(backgroundView)
+    }
+
 }

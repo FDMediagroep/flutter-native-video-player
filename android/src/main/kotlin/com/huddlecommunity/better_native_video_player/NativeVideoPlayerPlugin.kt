@@ -23,27 +23,29 @@ import io.flutter.plugin.platform.PlatformViewFactory
  * Implements ActivityAware to get access to the Activity for fullscreen dialogs
  */
 @UnstableApi
-class NativeVideoPlayerPlugin : FlutterPlugin, ActivityAware {
+class NativeVideoPlayerPlugin(
+    private val sharedPlayerManager: SharedPlayerManager = SharedPlayerManager()
+) : FlutterPlugin, ActivityAware {
     companion object {
         private const val TAG = "NativeVideoPlayerPlugin"
         private const val VIEW_TYPE = "native_video_player"
 
         // Store registered views
-        private val registeredViews = mutableMapOf<Long, VideoPlayerBackend>()
+        private val registeredViews = mutableMapOf<BinaryMessenger, MutableMap<Long, VideoPlayerBackend>>()
 
         // Store current activity
         private var currentActivity: Activity? = null
 
         private val attachedPlugins = mutableSetOf<NativeVideoPlayerPlugin>()
 
-        fun registerView(view: VideoPlayerBackend, viewId: Long) {
+        fun registerView(messenger: BinaryMessenger, view: VideoPlayerBackend, viewId: Long) {
             NpLog.d(TAG, "Registering view with id: $viewId")
-            registeredViews[viewId] = view
+            registeredViews.getOrPut(messenger) { mutableMapOf() }[viewId] = view
         }
 
-        fun unregisterView(viewId: Long) {
+        fun unregisterView(messenger: BinaryMessenger, viewId: Long) {
             NpLog.d(TAG, "Unregistering view with id: $viewId")
-            registeredViews.remove(viewId)
+            registeredViews[messenger]?.remove(viewId)
         }
 
         fun getActivity(): Activity? = currentActivity
@@ -53,7 +55,7 @@ class NativeVideoPlayerPlugin : FlutterPlugin, ActivityAware {
          * Used by MainActivity to trigger automatic PiP on user leave hint
          */
         fun getAllViews(): Collection<VideoPlayerView> =
-            registeredViews.values.filterIsInstance<VideoPlayerView>()
+            registeredViews.values.flatMap { it.values }.filterIsInstance<VideoPlayerView>()
     }
 
     private var methodChannel: MethodChannel? = null
@@ -73,7 +75,7 @@ class NativeVideoPlayerPlugin : FlutterPlugin, ActivityAware {
     private fun setupControllerEventChannel(controllerId: Int): Boolean {
         val binaryMessenger = messenger ?: return false
         if (controllerEventChannels.containsKey(controllerId)) return true
-        val handler = ControllerEventChannelHandler(controllerId)
+        val handler = ControllerEventChannelHandler(controllerId, sharedPlayerManager)
         val channel = EventChannel(binaryMessenger, "native_video_player_controller_$controllerId")
         channel.setStreamHandler(handler)
         controllerEventChannels[controllerId] = channel
@@ -102,7 +104,7 @@ class NativeVideoPlayerPlugin : FlutterPlugin, ActivityAware {
         // Register platform view factory
         binding.platformViewRegistry.registerViewFactory(
             VIEW_TYPE,
-            VideoPlayerViewFactory(binding.binaryMessenger, binding.applicationContext)
+            VideoPlayerViewFactory(binding.binaryMessenger, binding.applicationContext, sharedPlayerManager)
         )
 
         val applicationContext = binding.applicationContext
@@ -147,7 +149,7 @@ class NativeVideoPlayerPlugin : FlutterPlugin, ActivityAware {
                     val args = call.arguments as? Map<*, *>
                     val controllerId = args?.get("controllerId") as? Int
                     if (controllerId != null) {
-                        SharedPlayerManager.removePlayer(applicationContext, controllerId)
+                        sharedPlayerManager.removePlayer(applicationContext, controllerId)
                         result.success(null)
                     } else {
                         result.error("INVALID_ARGUMENT", "Controller ID is required", null)
@@ -188,11 +190,12 @@ class NativeVideoPlayerPlugin : FlutterPlugin, ActivityAware {
                         applicationContext,
                         viewId,
                         params,
+                        sharedPlayerManager,
                         binding.binaryMessenger,
                         producer
                     )
                     textureBackends[viewId] = backend
-                    registerView(backend, viewId)
+                    registerView(binding.binaryMessenger, backend, viewId)
                     result.success(mapOf("textureId" to producer.id()))
                     return@setMethodCallHandler
                 }
@@ -233,7 +236,7 @@ class NativeVideoPlayerPlugin : FlutterPlugin, ActivityAware {
 
             val args = call.arguments as? Map<*, *>
             val viewId = args?.get("viewId") as? Number
-            val view = viewId?.toLong()?.let { registeredViews[it] }
+            val view = viewId?.toLong()?.let { registeredViews[binding.binaryMessenger]?.get(it) }
 
             if (view != null) {
                 view.handleMethodCall(call, result)
@@ -296,7 +299,11 @@ class NativeVideoPlayerPlugin : FlutterPlugin, ActivityAware {
         methodChannel = null
         assetChannel?.setMethodCallHandler(null)
         assetChannel = null
+        registeredViews.remove(binding.binaryMessenger)?.values?.toList()?.forEach { backend ->
+            backend.dispose()
+        }
         disposeAllTextureBackends()
+        sharedPlayerManager.clearAll(binding.applicationContext)
         textureRegistry = null
         controllerEventChannels.keys.toList().forEach { teardownControllerEventChannel(it) }
         messenger = null
@@ -304,7 +311,6 @@ class NativeVideoPlayerPlugin : FlutterPlugin, ActivityAware {
 
         if (attachedPlugins.isEmpty()) {
             VideoCacheManager.cancelAllPrecache()
-            SharedPlayerManager.clearAll(binding.applicationContext)
         }
     }
 
@@ -338,7 +344,8 @@ class NativeVideoPlayerPlugin : FlutterPlugin, ActivityAware {
 @UnstableApi
 class VideoPlayerViewFactory(
     private val messenger: BinaryMessenger,
-    private val context: Context
+    private val context: Context,
+    private val sharedPlayerManager: SharedPlayerManager
 ) : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
 
     companion object {
@@ -355,10 +362,11 @@ class VideoPlayerViewFactory(
             context = this.context,
             viewId = viewId.toLong(),
             args = creationParams,
+            sharedPlayerManager = sharedPlayerManager,
             binaryMessenger = messenger
         )
 
-        NativeVideoPlayerPlugin.registerView(view, viewId.toLong())
+        NativeVideoPlayerPlugin.registerView(messenger, view, viewId.toLong())
         return view
     }
 }

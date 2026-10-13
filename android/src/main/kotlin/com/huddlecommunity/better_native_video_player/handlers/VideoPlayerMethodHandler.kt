@@ -42,6 +42,7 @@ import com.huddlecommunity.better_native_video_player.manager.VideoCacheManager
 @UnstableApi
 class VideoPlayerMethodHandler(
     private val context: Context,
+    private val sharedPlayerManager: SharedPlayerManager,
     private val player: ExoPlayer,
     private val eventHandler: VideoPlayerEventHandler,
     private val notificationHandler: VideoPlayerNotificationHandler,
@@ -406,7 +407,7 @@ class VideoPlayerMethodHandler(
 
                 // Store in SharedPlayerManager if this is a shared player
                 if (controllerId != null) {
-                    SharedPlayerManager.setQualities(controllerId, availableQualities)
+                    sharedPlayerManager.setQualities(controllerId, availableQualities)
                 }
 
                 // Send qualityChange event to notify Flutter that qualities are loaded
@@ -849,7 +850,7 @@ class VideoPlayerMethodHandler(
             result.success(availableQualities)
         } else if (controllerId != null) {
             // If instance is empty but cache has qualities, restore them
-            val cachedQualities = SharedPlayerManager.getQualities(controllerId)
+            val cachedQualities = sharedPlayerManager.getQualities(controllerId)
             if (cachedQualities != null && cachedQualities.isNotEmpty()) {
                 availableQualities = cachedQualities
                 NpLog.d(TAG, "🔄 Restored ${cachedQualities.size} qualities from cache for controller $controllerId")
@@ -872,7 +873,7 @@ class VideoPlayerMethodHandler(
 
         // Remove from shared manager if this is a shared player
         if (controllerId != null) {
-            SharedPlayerManager.removePlayer(context, controllerId)
+            sharedPlayerManager.removePlayer(context, controllerId)
             NpLog.d(TAG, "Removed shared player for controller ID: $controllerId")
         }
 

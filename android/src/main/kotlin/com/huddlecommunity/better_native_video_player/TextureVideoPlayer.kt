@@ -6,6 +6,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import com.huddlecommunity.better_native_video_player.manager.SharedPlayerManager
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -38,7 +39,8 @@ class TextureVideoPlayer(
     context: Context,
     override val backendViewId: Long,
     args: Map<String, Any>?,
-    binaryMessenger: BinaryMessenger,
+    private val sharedPlayerManager: SharedPlayerManager,
+    private val binaryMessenger: BinaryMessenger,
     private val surfaceProducer: TextureRegistry.SurfaceProducer
 ) : VideoPlayerBackend, TextureRegistry.SurfaceProducer.Callback {
 
@@ -64,6 +66,7 @@ class TextureVideoPlayer(
     init {
         session = PlayerBackendSession(
             context = context,
+            sharedPlayerManager = sharedPlayerManager,
             viewId = backendViewId,
             args = args,
             binaryMessenger = binaryMessenger,
@@ -176,7 +179,7 @@ class TextureVideoPlayer(
         isDisposed = true
         NpLog.d(TAG, "TextureVideoPlayer dispose (viewId $backendViewId)")
 
-        NativeVideoPlayerPlugin.unregisterView(backendViewId)
+        NativeVideoPlayerPlugin.unregisterView(binaryMessenger, backendViewId)
         player.removeListener(videoSizeListener)
 
         session.disposeCommon(detachOutput = {

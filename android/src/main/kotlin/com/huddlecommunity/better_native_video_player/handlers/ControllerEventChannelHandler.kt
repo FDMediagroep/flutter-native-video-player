@@ -12,7 +12,8 @@ import io.flutter.plugin.common.EventChannel
  * It is only torn down when the Dart controller is disposed.
  */
 class ControllerEventChannelHandler(
-    private val controllerId: Int
+    private val controllerId: Int,
+    private val sharedPlayerManager: SharedPlayerManager
 ) : EventChannel.StreamHandler {
     private var sink: EventChannel.EventSink? = null
 
@@ -20,13 +21,13 @@ class ControllerEventChannelHandler(
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
         if (events != null) {
             sink = events
-            SharedPlayerManager.registerControllerEventSink(controllerId, events)
+            sharedPlayerManager.registerControllerEventSink(controllerId, events)
         }
     }
 
     /** Unregisters the event sink from [SharedPlayerManager]. */
     override fun onCancel(arguments: Any?) {
-        sink?.let { SharedPlayerManager.unregisterControllerEventSink(controllerId, it) }
+        sink?.let { sharedPlayerManager.unregisterControllerEventSink(controllerId, it) }
         sink = null
     }
 }

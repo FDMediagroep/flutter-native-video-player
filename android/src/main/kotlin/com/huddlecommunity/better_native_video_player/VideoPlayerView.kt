@@ -20,6 +20,7 @@ import androidx.media3.common.VideoSize
 import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import com.huddlecommunity.better_native_video_player.manager.SharedPlayerManager
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.SubtitleView
@@ -36,7 +37,8 @@ class VideoPlayerView(
     private val context: Context,
     private val viewId: Long,
     private val args: Map<String, Any>?,
-    binaryMessenger: io.flutter.plugin.common.BinaryMessenger
+    private val sharedPlayerManager: SharedPlayerManager,
+    private val binaryMessenger: io.flutter.plugin.common.BinaryMessenger
 ) : PlatformView, VideoPlayerBackend {
 
     companion object {
@@ -101,6 +103,7 @@ class VideoPlayerView(
 
         session = PlayerBackendSession(
             context = context,
+            sharedPlayerManager = sharedPlayerManager,
             viewId = viewId,
             args = args,
             binaryMessenger = binaryMessenger,
@@ -692,6 +695,7 @@ class VideoPlayerView(
     }
 
     override fun dispose() {
+        if (isDisposed) return
         NpLog.d(TAG, "VideoPlayerView dispose for id: $viewId")
 
         // Mark as disposed to prevent any further events
@@ -699,7 +703,7 @@ class VideoPlayerView(
 
         // Remove this view from the plugin's static registry (otherwise the
         // map keeps a strong reference to every view ever created)
-        NativeVideoPlayerPlugin.unregisterView(viewId)
+        NativeVideoPlayerPlugin.unregisterView(binaryMessenger, viewId)
 
         // Exit fullscreen if active
         if (isFullScreen) {

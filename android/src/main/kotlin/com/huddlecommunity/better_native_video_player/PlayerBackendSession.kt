@@ -32,6 +32,7 @@ import io.flutter.plugin.common.EventChannel
 @UnstableApi
 class PlayerBackendSession(
     private val context: Context,
+    private val sharedPlayerManager: SharedPlayerManager,
     private val viewId: Long,
     args: Map<String, Any>?,
     binaryMessenger: BinaryMessenger,
@@ -87,7 +88,7 @@ class PlayerBackendSession(
             args?.get("androidForceSoftwareDecoders") as? Boolean ?: false
         val sharedFlag: Boolean
         player = if (controllerId != null) {
-            val (sharedPlayer, alreadyExisted) = SharedPlayerManager.getOrCreatePlayer(
+            val (sharedPlayer, alreadyExisted) = sharedPlayerManager.getOrCreatePlayer(
                 context,
                 controllerId,
                 bufferConfig,
@@ -104,7 +105,7 @@ class PlayerBackendSession(
         } else {
             NpLog.d(TAG, "No controller ID provided, creating new player")
             sharedFlag = false
-            SharedPlayerManager.buildPlayer(
+            sharedPlayerManager.buildPlayer(
                 context,
                 bufferConfig,
                 prioritizeActivePlayback,
@@ -127,7 +128,7 @@ class PlayerBackendSession(
 
         // Setup notification handler (shared for shared players)
         notificationHandler = if (controllerId != null) {
-            val handler = SharedPlayerManager.getOrCreateNotificationHandler(
+            val handler = sharedPlayerManager.getOrCreateNotificationHandler(
                 context, controllerId, player, eventHandler
             )
             // Update event handler for shared notification handler (in case it's being reused)
@@ -140,6 +141,7 @@ class PlayerBackendSession(
         // Setup method handler with callback to update media info
         methodHandler = VideoPlayerMethodHandler(
             context = context,
+            sharedPlayerManager = sharedPlayerManager,
             player = player,
             eventHandler = eventHandler,
             notificationHandler = notificationHandler,
@@ -169,7 +171,7 @@ class PlayerBackendSession(
         // Register this backend with SharedPlayerManager if using a shared player
         // This allows other backends to notify us when they're disposed
         if (controllerId != null) {
-            SharedPlayerManager.registerView(controllerId, viewId) {
+            sharedPlayerManager.registerView(controllerId, viewId) {
                 onSiblingDisposed()
             }
         }
@@ -305,7 +307,7 @@ class PlayerBackendSession(
      * The display-independent disposal sequence, extracted verbatim from
      * VideoPlayerView.dispose. [detachOutput] runs the backend-specific
      * surface detach for shared players (another backend may still display
-     * this player) before unregistering from SharedPlayerManager.
+     * this player) before unregistering from sharedPlayerManager.
      */
     fun disposeCommon(detachOutput: () -> Unit) {
         // Remove listeners and stop periodic updates
@@ -337,7 +339,7 @@ class PlayerBackendSession(
             detachOutput()
 
             // Unregister this backend and notify remaining backends to reconnect their surfaces
-            SharedPlayerManager.unregisterView(controllerId, viewId)
+            sharedPlayerManager.unregisterView(controllerId, viewId)
         } else {
             // Only release if not shared (for non-shared players, fully clean up media session)
             notificationHandler.release()

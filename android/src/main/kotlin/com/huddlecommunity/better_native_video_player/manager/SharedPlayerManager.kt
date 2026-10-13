@@ -22,8 +22,11 @@ import io.flutter.plugin.common.EventChannel
  * Keeps players and notification handlers alive even when platform views are disposed
  * Note: Each platform view gets its own PlayerView, but they share the same ExoPlayer and NotificationHandler
  */
-object SharedPlayerManager {
-    private const val TAG = "SharedPlayerManager"
+class SharedPlayerManager {
+    companion object {
+        private const val TAG = "SharedPlayerManager"
+        private val managersWithPlayers = mutableSetOf<SharedPlayerManager>()
+    }
 
     private val players = mutableMapOf<Int, ExoPlayer>()
     private val notificationHandlers = mutableMapOf<Int, VideoPlayerNotificationHandler>()
@@ -91,6 +94,7 @@ object SharedPlayerManager {
         val player = players.getOrPut(controllerId) {
             buildPlayer(context, bufferConfig, prioritizeActivePlayback, forceSoftwareDecoders)
         }
+        managersWithPlayers.add(this)
         return Pair(player, alreadyExisted)
     }
 
@@ -286,12 +290,15 @@ object SharedPlayerManager {
         stopAllViewsForController(controllerId)
 
         // Release notification handler
-        notificationHandlers[controllerId]?.release()
+        notificationHandlers[controllerId]?.release(
+            removeNotification = managersWithPlayers.all { it === this }
+        )
         notificationHandlers.remove(controllerId)
 
         // Release player
         players[controllerId]?.release()
         players.remove(controllerId)
+        if (players.isEmpty()) managersWithPlayers.remove(this)
 
         // Remove qualities cache
         qualitiesCache.remove(controllerId)
@@ -312,15 +319,19 @@ object SharedPlayerManager {
      */
     fun clearAll(context: Context) {
         // Release all notification handlers
-        notificationHandlers.values.forEach { it.release() }
+        notificationHandlers.values.forEach {
+            it.release(removeNotification = managersWithPlayers.all { manager -> manager === this })
+        }
         notificationHandlers.clear()
 
         // Release all players
         players.values.forEach { it.release() }
         players.clear()
+        managersWithPlayers.remove(this)
 
         // Clear qualities cache
         qualitiesCache.clear()
+        activeViews.clear()
 
         // Drop controller-level event sinks (their channels are torn down by
         // the plugin on engine detach)
@@ -334,6 +345,8 @@ object SharedPlayerManager {
      * Stops the playback foreground service and removes its notification.
      */
     private fun stopMediaSessionService(context: Context) {
-        VideoPlayerMediaSessionService.stop(context, removeNotification = true)
+        if (managersWithPlayers.isEmpty()) {
+            VideoPlayerMediaSessionService.stop(context, removeNotification = true)
+        }
     }
 }
