@@ -39,6 +39,43 @@ class VideoPlayerDrmHandler: NSObject {
         super.init()
     }
     
+    /// A FairPlay configuration that can never deliver keys, known before
+    /// anything loads. The load fails with it right away instead of waiting
+    /// for keys that never arrive. Other DRM types are not checked here.
+    func configurationError() -> Error? {
+        guard (drmConfig["type"] as? String)?.lowercased() == "fairplay" else {
+            return nil
+        }
+
+        if licenseUrl == nil {
+            return drmError("License URL is required for FairPlay")
+        }
+
+        if certificateUrl == nil {
+            return drmError("Certificate URL is required for FairPlay")
+        }
+
+        if !["binary", "base64"].contains(certificateEncoding) {
+            return drmError("Unsupported FairPlay certificateEncoding: \(certificateEncoding)")
+        }
+
+        if !["binary", "base64form"].contains(licenseRequestFormat) {
+            return drmError("Unsupported FairPlay licenseRequestFormat: \(licenseRequestFormat)")
+        }
+
+        if !["binary", "base64"].contains(licenseResponseEncoding) {
+            return drmError("Unsupported FairPlay licenseResponseEncoding: \(licenseResponseEncoding)")
+        }
+
+        #if targetEnvironment(simulator)
+        // AVContentKeySession(keySystem: .fairPlayStreaming) throws an
+        // Objective-C exception in the Simulator, which would crash the app.
+        return drmError("FairPlay Streaming is not supported in the iOS Simulator")
+        #else
+        return nil
+        #endif
+    }
+
     /// Sets up DRM for the given asset
     /// - Parameters:
     ///   - asset: The AVURLAsset to configure DRM for
@@ -70,36 +107,17 @@ class VideoPlayerDrmHandler: NSObject {
     
     /// Sets up FairPlay DRM
     private func setupFairPlay(asset: AVURLAsset, completion: @escaping (Bool, Error?) -> Void) {
-        guard let licenseUrl = licenseUrl else {
-            let error = NSError(domain: "VideoPlayerDrmHandler", code: -1, userInfo: [NSLocalizedDescriptionKey: "License URL is required for FairPlay"])
+        if let error = configurationError() {
             completion(false, error)
             return
         }
 
-        guard let certificateUrl = certificateUrl else {
-            let error = drmError("Certificate URL is required for FairPlay")
-            completion(false, error)
+        // Both are guaranteed by configurationError() above.
+        guard let licenseUrl = licenseUrl, let certificateUrl = certificateUrl else {
+            completion(false, drmError("FairPlay license or certificate URL missing"))
             return
         }
 
-        guard ["binary", "base64"].contains(certificateEncoding) else {
-            let error = drmError("Unsupported FairPlay certificateEncoding: \(certificateEncoding)")
-            completion(false, error)
-            return
-        }
-
-        guard ["binary", "base64form"].contains(licenseRequestFormat) else {
-            let error = drmError("Unsupported FairPlay licenseRequestFormat: \(licenseRequestFormat)")
-            completion(false, error)
-            return
-        }
-
-        guard ["binary", "base64"].contains(licenseResponseEncoding) else {
-            let error = drmError("Unsupported FairPlay licenseResponseEncoding: \(licenseResponseEncoding)")
-            completion(false, error)
-            return
-        }
-        
         npLog("🔐 DRM: Setting up FairPlay - License URL: \(licenseUrl.absoluteString)")
         
         // Create content key session

@@ -146,6 +146,18 @@ extension VideoPlayerView {
             self.drmHandler?.cleanup()
             
             let drmHandler = VideoPlayerDrmHandler(drmConfig: drmConfig)
+
+            // A FairPlay configuration that can never deliver keys fails the
+            // load now, instead of loading until the Dart load watchdog fires.
+            if let configurationError = drmHandler.configurationError() {
+                self.drmHandler = nil
+                let message = configurationError.localizedDescription
+                npLog("🔐 DRM: \(message)")
+                sendEvent("error", data: ["message": message])
+                result(FlutterError(code: "LOAD_ERROR", message: message, details: nil))
+                return
+            }
+
             self.drmHandler = drmHandler
             
             // Setup DRM asynchronously

@@ -42,6 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   content key requests no longer fail when
   `AVContentKeyRequest.initializationData` is absent, and requests that
   arrive while the certificate is loading are queued.
+- **iOS: a FairPlay configuration error fails `load()` right away.** A
+  missing license or certificate URL, or an unknown format option, now ends
+  the load with that message and the `error` state, instead of loading until
+  the load watchdog fires. In the iOS Simulator, which has no FairPlay, this
+  replaces a crash (`AVContentKeySession` threw an Objective-C exception).
 
 ### Changed
 - **iOS Swift Package Manager: the package now depends on
