@@ -454,11 +454,13 @@ class VideoPlayerNotificationHandler(
     /**
      * Releases MediaSession and hides notification
      */
-    fun release() {
+    fun release(removeNotification: Boolean = true) {
         stopPositionUpdates()
         player.removeListener(playerListener)
-        VideoPlayerMediaSessionService.stop(context, removeNotification = true)
-        hideNotification()
+        if (removeNotification) {
+            VideoPlayerMediaSessionService.stop(context, removeNotification = true)
+            hideNotification()
+        }
 
         mediaSession?.release()
         mediaSession = null
