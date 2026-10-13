@@ -8,6 +8,7 @@
 
 import 'package:better_native_video_player/better_native_video_player.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
@@ -48,9 +49,14 @@ void main() {
       url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
     );
 
-    // Wait for video to load
+    // Wait for video to load. With autoPlay, playback may already have
+    // started by the time load() returns.
     await tester.pumpAndSettle();
-    expect(controller.activityState.isLoaded, isTrue);
+    expect(
+      controller.activityState,
+      anyOf(PlayerActivityState.loaded, PlayerActivityState.playing),
+    );
+    expect(controller.duration, greaterThan(Duration.zero));
 
     // Test playback controls
     await controller.play();
@@ -131,13 +137,19 @@ void main() {
     // Initialize and try to load invalid URL
     await controller.initialize();
 
-    // This should trigger an error event
-    await controller.load(url: 'https://invalid-url/video.m3u8');
+    // The native load rejects an unreachable host.
+    await expectLater(
+      controller.load(url: 'https://invalid-url/video.m3u8'),
+      throwsA(isA<PlatformException>()),
+    );
 
     await tester.pumpAndSettle();
+    expect(controller.activityState, PlayerActivityState.error);
   });
 
   testWidgets('Picture-in-Picture test', (WidgetTester tester) async {
+    // Replaces the setUp controller; tearDown only disposes this one.
+    await controller.dispose();
     controller = NativeVideoPlayerController(
       id: 1,
       autoPlay: true,
