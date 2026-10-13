@@ -230,9 +230,11 @@ object SharedPlayerManager {
     /**
      * Unregisters a controller-level event sink
      */
-    fun unregisterControllerEventSink(controllerId: Int) {
-        controllerEventSinks.remove(controllerId)
-        NpLog.d(TAG, "Unregistered controller event sink for controller $controllerId")
+    fun unregisterControllerEventSink(controllerId: Int, sink: EventChannel.EventSink) {
+        if (controllerEventSinks[controllerId] === sink) {
+            controllerEventSinks.remove(controllerId)
+            NpLog.d(TAG, "Unregistered controller event sink for controller $controllerId")
+        }
     }
 
     /**

@@ -61,7 +61,9 @@ android {
         // Media notification style
         implementation("androidx.media:media:1.7.0")
 
-        testImplementation("org.jetbrains.kotlin:kotlin-test")
+        testImplementation("org.jetbrains.kotlin:kotlin-test-junit")
+        testImplementation("org.robolectric:robolectric:4.14.1")
+        testRuntimeOnly("org.junit.vintage:junit-vintage-engine:5.10.3")
         testImplementation("org.mockito:mockito-core:5.0.0")
     }
 

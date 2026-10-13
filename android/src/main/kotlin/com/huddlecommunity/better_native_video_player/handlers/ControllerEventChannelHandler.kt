@@ -14,16 +14,19 @@ import io.flutter.plugin.common.EventChannel
 class ControllerEventChannelHandler(
     private val controllerId: Int
 ) : EventChannel.StreamHandler {
+    private var sink: EventChannel.EventSink? = null
 
     /** Registers the event sink with [SharedPlayerManager] for persistent delivery. */
     override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
         if (events != null) {
+            sink = events
             SharedPlayerManager.registerControllerEventSink(controllerId, events)
         }
     }
 
     /** Unregisters the event sink from [SharedPlayerManager]. */
     override fun onCancel(arguments: Any?) {
-        SharedPlayerManager.unregisterControllerEventSink(controllerId)
+        sink?.let { SharedPlayerManager.unregisterControllerEventSink(controllerId, it) }
+        sink = null
     }
 }

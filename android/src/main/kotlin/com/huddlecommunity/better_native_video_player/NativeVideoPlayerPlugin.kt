@@ -34,26 +34,7 @@ class NativeVideoPlayerPlugin : FlutterPlugin, ActivityAware {
         // Store current activity
         private var currentActivity: Activity? = null
 
-        // Messenger of the most recently attached engine; needed to create
-        // controller-level EventChannels before any platform view exists.
-        private var messenger: BinaryMessenger? = null
-
-        // Texture registry of the most recently attached engine (texture
-        // rendering mode). Texture backends have no engine-side owner, so
-        // the plugin retains them strongly until viewDisposed/engine detach.
-        private var textureRegistry: io.flutter.view.TextureRegistry? = null
-        private val textureBackends = mutableMapOf<Long, TextureVideoPlayer>()
-
-        private fun disposeAllTextureBackends() {
-            // dispose() unregisters from registeredViews; iterate a copy.
-            textureBackends.values.toList().forEach { it.dispose() }
-            textureBackends.clear()
-        }
-
-        // Controller-level EventChannels keyed by controller ID. Created on
-        // demand via setupControllerEventChannel (called from the Dart
-        // controller constructor) and torn down on controller dispose.
-        private val controllerEventChannels = mutableMapOf<Int, EventChannel>()
+        private val attachedPlugins = mutableSetOf<NativeVideoPlayerPlugin>()
 
         fun registerView(view: VideoPlayerBackend, viewId: Long) {
             NpLog.d(TAG, "Registering view with id: $viewId")
@@ -73,44 +54,36 @@ class NativeVideoPlayerPlugin : FlutterPlugin, ActivityAware {
          */
         fun getAllViews(): Collection<VideoPlayerView> =
             registeredViews.values.filterIsInstance<VideoPlayerView>()
+    }
 
-        /**
-         * Registers the StreamHandler for `native_video_player_controller_<id>`.
-         *
-         * Called via the shared method channel from the Dart controller
-         * constructor BEFORE Dart listens, so the EventChannel `listen` call
-         * always finds a native handler (avoids MissingPluginException).
-         * Idempotent: an existing registration for the ID is kept (the Dart
-         * side re-listening simply replaces the sink via onListen).
-         */
-        fun setupControllerEventChannel(controllerId: Int) {
-            if (controllerEventChannels.containsKey(controllerId)) {
-                NpLog.d(TAG, "Controller event channel for $controllerId already exists")
-                return
-            }
-            val binaryMessenger = messenger
-            if (binaryMessenger == null) {
-                NpLog.w(TAG, "Cannot setup controller event channel - no messenger")
-                return
-            }
-            val channel = EventChannel(
-                binaryMessenger,
-                "native_video_player_controller_$controllerId"
-            )
-            channel.setStreamHandler(ControllerEventChannelHandler(controllerId))
-            controllerEventChannels[controllerId] = channel
-            NpLog.d(TAG, "Set up controller event channel for controller $controllerId")
-        }
+    private var methodChannel: MethodChannel? = null
+    private var assetChannel: MethodChannel? = null
+    private var messenger: BinaryMessenger? = null
+    private var textureRegistry: io.flutter.view.TextureRegistry? = null
+    private val textureBackends = mutableMapOf<Long, TextureVideoPlayer>()
+    private val controllerEventChannels = mutableMapOf<Int, EventChannel>()
+    private val controllerEventHandlers = mutableMapOf<Int, ControllerEventChannelHandler>()
+    private var activity: Activity? = null
 
-        /**
-         * Removes the StreamHandler registered by [setupControllerEventChannel].
-         * Idempotent; also defensively drops the sink in case onCancel never ran.
-         */
-        fun teardownControllerEventChannel(controllerId: Int) {
-            controllerEventChannels.remove(controllerId)?.setStreamHandler(null)
-            SharedPlayerManager.unregisterControllerEventSink(controllerId)
-            NpLog.d(TAG, "Tore down controller event channel for controller $controllerId")
-        }
+    private fun disposeAllTextureBackends() {
+        textureBackends.values.toList().forEach { it.dispose() }
+        textureBackends.clear()
+    }
+
+    private fun setupControllerEventChannel(controllerId: Int): Boolean {
+        val binaryMessenger = messenger ?: return false
+        if (controllerEventChannels.containsKey(controllerId)) return true
+        val handler = ControllerEventChannelHandler(controllerId)
+        val channel = EventChannel(binaryMessenger, "native_video_player_controller_$controllerId")
+        channel.setStreamHandler(handler)
+        controllerEventChannels[controllerId] = channel
+        controllerEventHandlers[controllerId] = handler
+        return true
+    }
+
+    private fun teardownControllerEventChannel(controllerId: Int) {
+        controllerEventChannels.remove(controllerId)?.setStreamHandler(null)
+        controllerEventHandlers.remove(controllerId)?.onCancel(null)
     }
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
@@ -122,6 +95,7 @@ class NativeVideoPlayerPlugin : FlutterPlugin, ActivityAware {
 
         NpLog.d(TAG, "Registering NativeVideoPlayerPlugin")
 
+        attachedPlugins.add(this)
         messenger = binding.binaryMessenger
         textureRegistry = binding.textureRegistry
 
@@ -135,6 +109,7 @@ class NativeVideoPlayerPlugin : FlutterPlugin, ActivityAware {
 
         // Register method channel for forwarding calls to specific views
         val channel = MethodChannel(binding.binaryMessenger, VIEW_TYPE)
+        methodChannel = channel
         channel.setMethodCallHandler { call, result ->
             NpLog.d(TAG, "Plugin received method call: ${call.method}")
 
@@ -144,8 +119,11 @@ class NativeVideoPlayerPlugin : FlutterPlugin, ActivityAware {
                     val args = call.arguments as? Map<*, *>
                     val controllerId = args?.get("controllerId") as? Int
                     if (controllerId != null) {
-                        setupControllerEventChannel(controllerId)
-                        result.success(null)
+                        if (setupControllerEventChannel(controllerId)) {
+                            result.success(null)
+                        } else {
+                            result.error("NO_ENGINE", "Engine messenger unavailable", null)
+                        }
                     } else {
                         result.error("INVALID_ARGUMENT", "Controller ID is required", null)
                     }
@@ -265,8 +243,9 @@ class NativeVideoPlayerPlugin : FlutterPlugin, ActivityAware {
         }
 
         // Register asset resolution channel
-        val assetChannel = MethodChannel(binding.binaryMessenger, "native_video_player/assets")
-        assetChannel.setMethodCallHandler { call, result ->
+        val assets = MethodChannel(binding.binaryMessenger, "native_video_player/assets")
+        assetChannel = assets
+        assets.setMethodCallHandler { call, result ->
             when (call.method) {
                 "resolveAssetPath" -> {
                     val assetKey = (call.arguments as? Map<*, *>)?.get("assetKey") as? String
@@ -311,31 +290,28 @@ class NativeVideoPlayerPlugin : FlutterPlugin, ActivityAware {
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        NpLog.d(TAG, "NativeVideoPlayerPlugin detached - cleaning up all players")
+        NpLog.d(TAG, "NativeVideoPlayerPlugin detached")
 
-        // Stop in-flight precache downloads. The disk cache itself stays
-        // open: SimpleCache is process-lifetime (it throws if the same
-        // directory is reopened, e.g. after a Flutter hot restart).
-        VideoCacheManager.cancelAllPrecache()
-
-        // Texture backends are plugin-owned (no PlatformView lifecycle):
-        // release their surfaces before the engine goes away.
+        methodChannel?.setMethodCallHandler(null)
+        methodChannel = null
+        assetChannel?.setMethodCallHandler(null)
+        assetChannel = null
         disposeAllTextureBackends()
         textureRegistry = null
-
-        // Tear down all controller-level event channels before dropping the messenger
-        controllerEventChannels.values.forEach { it.setStreamHandler(null) }
-        controllerEventChannels.clear()
+        controllerEventChannels.keys.toList().forEach { teardownControllerEventChannel(it) }
         messenger = null
+        attachedPlugins.remove(this)
 
-        // Clean up all shared players when the Flutter engine is detached
-        // This ensures players are properly disposed when the app is closed/terminated
-        SharedPlayerManager.clearAll(binding.applicationContext)
+        if (attachedPlugins.isEmpty()) {
+            VideoCacheManager.cancelAllPrecache()
+            SharedPlayerManager.clearAll(binding.applicationContext)
+        }
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         NpLog.d(TAG, "Plugin attached to activity: ${binding.activity}")
-        currentActivity = binding.activity
+        activity = binding.activity
+        currentActivity = activity
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
@@ -345,12 +321,14 @@ class NativeVideoPlayerPlugin : FlutterPlugin, ActivityAware {
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
         NpLog.d(TAG, "Plugin reattached to activity: ${binding.activity}")
-        currentActivity = binding.activity
+        activity = binding.activity
+        currentActivity = activity
     }
 
     override fun onDetachedFromActivity() {
         NpLog.d(TAG, "Plugin detached from activity")
-        currentActivity = null
+        if (currentActivity === activity) currentActivity = null
+        activity = null
     }
 }
 
