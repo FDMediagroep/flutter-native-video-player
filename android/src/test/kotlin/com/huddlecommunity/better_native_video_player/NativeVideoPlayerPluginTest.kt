@@ -73,6 +73,12 @@ class NativeVideoPlayerPluginTest {
 
     private fun attach(): Engine = Engine().also { engines.add(it) }
 
+    private fun <T> any(type: Class<T>): T {
+        ArgumentMatchers.any(type)
+        @Suppress("UNCHECKED_CAST")
+        return null as T
+    }
+
     @AfterTest
     fun detachEngines() {
         engines.asReversed().forEach { it.detach() }
@@ -200,8 +206,8 @@ class NativeVideoPlayerPluginTest {
             invocation.getArgument<MethodChannel.Result>(1).success(null)
             null
         }.`when`(mainView).handleMethodCall(
-            ArgumentMatchers.any(MethodCall::class.java),
-            ArgumentMatchers.any(MethodChannel.Result::class.java)
+            any(MethodCall::class.java),
+            any(MethodChannel.Result::class.java)
         )
         NativeVideoPlayerPlugin.registerView(main.messenger, mainView, 42L)
         NativeVideoPlayerPlugin.registerView(background.messenger, backgroundView, 42L)
@@ -211,8 +217,8 @@ class NativeVideoPlayerPluginTest {
         engines.remove(main)
 
         Mockito.verify(mainView).handleMethodCall(
-            ArgumentMatchers.any(MethodCall::class.java),
-            ArgumentMatchers.any(MethodChannel.Result::class.java)
+            any(MethodCall::class.java),
+            any(MethodChannel.Result::class.java)
         )
         Mockito.verify(mainView).dispose()
         Mockito.verifyNoInteractions(backgroundView)
