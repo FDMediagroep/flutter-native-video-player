@@ -680,7 +680,20 @@ class _SharedControllerEventChannel {
   void _dispatch(dynamic event) {
     for (final NativeVideoPlayerController controller
         in _controllers.toList()) {
-      controller._handleControllerEvent(event);
+      // A throwing app listener on one controller must not keep the event
+      // from the other controllers that share this channel.
+      try {
+        controller._handleControllerEvent(event);
+      } catch (exception, stack) {
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: exception,
+            stack: stack,
+            library: 'better_native_video_player',
+            context: ErrorDescription('while dispatching a controller event'),
+          ),
+        );
+      }
     }
   }
 
