@@ -69,6 +69,35 @@ extension VideoPlayerView {
         observedItem = nil
     }
 
+    /// Takes over observing the shared player from a view that goes away. Only
+    /// the view that loads registers the item KVO, the periodic time observer
+    /// and the end-of-item notification, so a view created before the item
+    /// existed must take over, or the controller stops reporting position,
+    /// buffering, play state and completion.
+    func takeOverObservingSharedPlayer(manualQualitySelected: Bool) {
+        guard let item = player?.currentItem else { return }
+
+        // Keep a quality picked through the view that went away: set before the
+        // observers, whose initial callback applies the viewport cap.
+        if manualQualitySelected {
+            self.manualQualitySelected = true
+        }
+
+        if observedItem !== item {
+            addObservers(to: item)
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(videoDidEnd),
+                name: .AVPlayerItemDidPlayToEndTime,
+                object: item
+            )
+        }
+
+        if timeObserver == nil {
+            setupPeriodicTimeObserver()
+        }
+    }
+
     /// Removes the player-level KVO registrations, if registered.
     func removePlayerStateObservers() {
         guard hasPlayerStateObservers else { return }

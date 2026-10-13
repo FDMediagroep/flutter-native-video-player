@@ -1174,11 +1174,20 @@ import QuartzCore
             let remainingViews = SharedPlayerManager.shared.findAllViewsForController(controllerIdValue)
             if !remainingViews.isEmpty {
                 npLog("📤 Emitting current state to \(remainingViews.count) remaining view(s) for controller \(controllerIdValue)")
-                for view in remainingViews {
-                    // Skip the view being disposed (just in case it's still in the list)
-                    if view.viewId != viewId {
-                        view.emitCurrentState()
-                    }
+                // Skip the view being disposed (just in case it's still in the list)
+                let otherViews = remainingViews.filter { $0.viewId != viewId }
+
+                // Only the view that loaded observes the player. If that was this
+                // one, a single remaining view takes over, or the controller would
+                // stop reporting.
+                if let successor = otherViews.first,
+                   let item = successor.player?.currentItem,
+                   !otherViews.contains(where: { $0.observedItem === item && $0.timeObserver != nil }) {
+                    successor.takeOverObservingSharedPlayer(manualQualitySelected: manualQualitySelected)
+                }
+
+                for view in otherViews {
+                    view.emitCurrentState()
                 }
             }
         }

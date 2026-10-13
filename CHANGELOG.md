@@ -46,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   close. A fullscreen change the native player made itself (its fullscreen
   button, or Done on iOS) is now only mirrored in Dart, and control
   listeners receive it once.
+- **iOS: a controller keeps reporting after one of its views goes away.**
+  Only the view that loaded the video observed the player. When a controller
+  had several views and that one was removed, the others kept playing but
+  sent no more position, buffering or play/pause updates to Dart. A
+  remaining view now takes over observing the player.
 - **iOS: `enterFullScreen()` / `exitFullScreen()` report the change once.**
   The present/dismiss completion and the `AVPlayerViewController` delegate
   both sent `fullscreenChange`, so control listeners got every
