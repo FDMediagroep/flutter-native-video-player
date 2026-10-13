@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.6.3] - 2026-10-14
 
 ### Added
 - **FairPlay provider formats** (#55): optional Base64 certificate/CKC
@@ -77,8 +77,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "missing a dependency on FlutterFramework" warning). Apps that use SwiftPM
   need Flutter 3.44 or later, where SwiftPM is on by default; before 3.44
   SwiftPM was opt-in, and CocoaPods builds are not affected.
-
-### Changed
 - **Android: the plugin's native classes are per Flutter engine.**
   `SharedPlayerManager` is no longer a process-wide `object` but one instance
   per plugin (engine), and the constructors of the internal view, backend
