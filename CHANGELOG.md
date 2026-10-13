@@ -46,6 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   close. A fullscreen change the native player made itself (its fullscreen
   button, or Done on iOS) is now only mirrored in Dart, and control
   listeners receive it once.
+- **iOS: `enterFullScreen()` / `exitFullScreen()` report the change once.**
+  The present/dismiss completion and the `AVPlayerViewController` delegate
+  both sent `fullscreenChange`, so control listeners got every
+  `fullscreenEntered` and `fullscreenExited` twice.
 - **No more `Error calling pause/dispose: NO_VIEW` on dispose.** The widget
   usually unmounts before its controller is disposed, and `dispose()` still
   sent `pause` and `dispose` to the view that was gone. Those calls are now

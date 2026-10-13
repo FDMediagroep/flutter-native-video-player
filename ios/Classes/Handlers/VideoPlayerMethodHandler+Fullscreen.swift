@@ -47,12 +47,21 @@ extension VideoPlayerView {
                     self.disableSwipeGestures(in: fullscreenPlayerViewController.view)
                 }
 
-                self.sendEvent("fullscreenChange", data: ["isFullscreen": true])
+                self.sendFullscreenChange(true)
                 result(nil)
             }
         } else {
             result(FlutterError(code: "FULLSCREEN_ERROR", message: "Could not present fullscreen player", details: nil))
         }
+    }
+
+    /// Reports a fullscreen change to Dart once. A present or dismiss started by
+    /// enterFullScreen/exitFullScreen is reported both by its completion and by
+    /// the AVPlayerViewController delegate, which sent every change twice.
+    func sendFullscreenChange(_ isFullscreen: Bool) {
+        guard isFullscreen != lastSentIsFullscreen else { return }
+        lastSentIsFullscreen = isFullscreen
+        sendEvent("fullscreenChange", data: ["isFullscreen": isFullscreen])
     }
 
     /// Recursively disables pan and pinch gesture recognizers in the view hierarchy.
@@ -94,7 +103,7 @@ extension VideoPlayerView {
                     self.rebindInlinePlayer()
                 }
 
-                self.sendEvent("fullscreenChange", data: ["isFullscreen": false])
+                self.sendFullscreenChange(false)
                 result(nil)
             }
         } else {
@@ -105,7 +114,7 @@ extension VideoPlayerView {
                     self.player?.play()
                 }
                 
-                self.sendEvent("fullscreenChange", data: ["isFullscreen": false])
+                self.sendFullscreenChange(false)
                 result(nil)
             }
         }
