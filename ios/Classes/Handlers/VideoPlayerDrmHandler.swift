@@ -194,9 +194,14 @@ class VideoPlayerDrmHandler: NSObject {
         // Note: We can't remove specific assets from the session without tracking them
         // The session will be cleaned up when deallocated
         contentKeySession = nil
-        certificateData = nil
-        certificateError = nil
-        pendingKeyRequests.removeAll()
+        // The certificate state and queued key requests are read and written on
+        // delegateQueue (certificate completion, key requests); cleanup runs on
+        // the main thread, so reset them there instead of racing that queue.
+        delegateQueue.async { [weak self] in
+            self?.certificateData = nil
+            self?.certificateError = nil
+            self?.pendingKeyRequests.removeAll()
+        }
         npLog("🔐 DRM: Cleaned up DRM handler")
     }
 
