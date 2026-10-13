@@ -2431,15 +2431,8 @@ class NativeVideoPlayerController {
       _dartFullscreenCloseCallback?.call();
     }
 
-    final controlEvent = PlayerControlEvent(
-      state: isFullscreen
-          ? PlayerControlState.fullscreenEntered
-          : PlayerControlState.fullscreenExited,
-      data: <String, dynamic>{'isFullscreen': isFullscreen},
-    );
-    for (final handler in _controlEventHandlers) {
-      handler(controlEvent);
-    }
+    // No control event here: the native fullscreenChange that called this
+    // already reaches every control listener.
   }
 
   /// Enters Dart-based fullscreen mode
