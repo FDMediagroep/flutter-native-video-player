@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `load()` overwrote the `playing` that native had already reported with
   `loaded`. Android sends no further play event, so the state read `loaded`
   for seconds while the video played.
+- **Android: tapping the player's own fullscreen button no longer leaves a
+  black screen** (#57). Dart mirrored the native `fullscreenChange` by
+  sending the command back, so one tap ran the transition twice and left a
+  second, orphaned fullscreen dialog behind that only the back button could
+  close. A fullscreen change the native player made itself (its fullscreen
+  button, or Done on iOS) is now only mirrored in Dart, and control
+  listeners receive it once.
 - **No more `Error calling pause/dispose: NO_VIEW` on dispose.** The widget
   usually unmounts before its controller is disposed, and `dispose()` still
   sent `pause` and `dispose` to the view that was gone. Those calls are now
