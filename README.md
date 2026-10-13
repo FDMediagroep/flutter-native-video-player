@@ -278,7 +278,7 @@ flutter pub get
 
 ### iOS Setup
 
-This plugin supports both **CocoaPods** and **Swift Package Manager (SPM)**. Flutter will automatically use the appropriate dependency manager based on your project configuration.
+This plugin supports both **CocoaPods** and **Swift Package Manager (SPM)**. Flutter will automatically use the appropriate dependency manager based on your project configuration. Swift Package Manager needs Flutter 3.44 or later (where it is on by default); on older Flutter versions, use CocoaPods.
 
 Add the following to your `Info.plist`:
 

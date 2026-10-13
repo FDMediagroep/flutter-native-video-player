@@ -20,6 +20,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `load()` overwrote the `playing` that native had already reported with
   `loaded`. Android sends no further play event, so the state read `loaded`
   for seconds while the video played.
+- **No more `Error calling pause/dispose: NO_VIEW` on dispose.** The widget
+  usually unmounts before its controller is disposed, and `dispose()` still
+  sent `pause` and `dispose` to the view that was gone. Those calls are now
+  only made while a view is alive; `disposeController` releases the native
+  player either way.
+
+### Changed
+- **iOS Swift Package Manager: the package now depends on
+  `FlutterFramework`**, as Flutter 3.44+ asks of plugins (this removes the
+  "missing a dependency on FlutterFramework" warning). Apps that use SwiftPM
+  need Flutter 3.44 or later, where SwiftPM is on by default; before 3.44
+  SwiftPM was opt-in, and CocoaPods builds are not affected.
 
 ### Changed
 - **Android: the plugin's native classes are per Flutter engine.**

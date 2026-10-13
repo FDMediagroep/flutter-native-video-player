@@ -2672,8 +2672,10 @@ class NativeVideoPlayerController {
       debugPrint('Controller channel setup failed during dispose: $e');
     }
 
-    // Pause playback first to avoid crashes during disposal
-    if (_state.activityState.isPlaying) {
+    // Pause playback first to avoid crashes during disposal. Without a live
+    // view (the widget usually unmounts first) the view-routed pause can only
+    // fail with NO_VIEW; disposeController below stops the player instead.
+    if (_platformViewIds.isNotEmpty && _state.activityState.isPlaying) {
       await pause();
       // Give the native side a moment to process the pause
       await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -2731,7 +2733,8 @@ class NativeVideoPlayerController {
     }
 
     // Dispose native player resources (removes shared player from manager).
-    if (_methodChannel != null) {
+    // Skipped without a live view for the same reason as the pause above.
+    if (_methodChannel != null && _platformViewIds.isNotEmpty) {
       await _methodChannel?.dispose();
     }
 
