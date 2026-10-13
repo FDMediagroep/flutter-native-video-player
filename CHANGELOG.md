@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Android: players keep working when the app runs a second Flutter
+  engine** (#59, #60). `firebase_messaging` starts one as soon as
+  `onBackgroundMessage` is set. Every controller then logged
+  `MissingPluginException` for `listen` and `cancel` on
+  `native_video_player_controller_<id>`, and when that engine was destroyed,
+  it released the app's players, so playback stopped and every later
+  controller's channel stayed broken. Controller channels, players and
+  texture views now belong to the engine that created them.
+- **Android: `activityState` stays `playing` after an autoplay `load()`.**
+  `load()` overwrote the `playing` that native had already reported with
+  `loaded`. Android sends no further play event, so the state read `loaded`
+  for seconds while the video played.
+
 ## [1.6.2] - 2026-09-29
 
 ### Added
