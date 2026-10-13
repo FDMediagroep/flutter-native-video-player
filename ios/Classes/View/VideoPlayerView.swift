@@ -138,6 +138,9 @@ import QuartzCore
     // Separate player view controller for fullscreen (prevents removing embedded view)
     var fullscreenPlayerViewController: AVPlayerViewController?
 
+    // The fullscreen state last reported to Dart (see sendFullscreenChange).
+    var lastSentIsFullscreen = false
+
     // When true, this platform view is the Dart fullscreen host and uses its own AVPlayerViewController
     // (same AVPlayer) so the inline view never loses its shared view. Cleared in deinit.
     var isDartFullscreenView: Bool = false

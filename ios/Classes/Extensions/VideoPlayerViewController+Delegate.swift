@@ -207,7 +207,7 @@ extension VideoPlayerView: AVPlayerViewControllerDelegate {
                 // Fullscreen entered: lift the viewport quality cap
                 self.fullscreenPlayerViewController = playerViewController
                 self.liftViewportCap()
-                self.sendEvent("fullscreenChange", data: ["isFullscreen": true])
+                self.sendFullscreenChange(true)
             }
         }
     }
@@ -228,7 +228,7 @@ extension VideoPlayerView: AVPlayerViewControllerDelegate {
         self.fullscreenPlayerViewController = nil
 
         // Send the fullscreen exit event immediately so Dart can react without delay.
-        self.sendEvent("fullscreenChange", data: ["isFullscreen": false])
+        self.sendFullscreenChange(false)
 
         // Re-bind the player to the embedded view after the dismiss animation finishes.
         coordinator.animate(alongsideTransition: nil) { _ in
