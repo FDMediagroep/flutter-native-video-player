@@ -1177,6 +1177,7 @@ import QuartzCore
                 for view in remainingViews {
                     // Skip the view being disposed (just in case it's still in the list)
                     if view.viewId != viewId {
+                        view.observeSharedPlayerIfNeeded()
                         view.emitCurrentState()
                     }
                 }

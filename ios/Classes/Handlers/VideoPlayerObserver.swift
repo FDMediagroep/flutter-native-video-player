@@ -69,6 +69,22 @@ extension VideoPlayerView {
         observedItem = nil
     }
 
+    /// Starts observing the shared player's current item and playback time if
+    /// this view is not doing so yet. Only the view that loads registers these,
+    /// so a view created before the item existed must take over when that view
+    /// goes away, or it stops reporting position, buffering and play state.
+    func observeSharedPlayerIfNeeded() {
+        guard let item = player?.currentItem else { return }
+
+        if observedItem !== item {
+            addObservers(to: item)
+        }
+
+        if timeObserver == nil {
+            setupPeriodicTimeObserver()
+        }
+    }
+
     /// Removes the player-level KVO registrations, if registered.
     func removePlayerStateObservers() {
         guard hasPlayerStateObservers else { return }
