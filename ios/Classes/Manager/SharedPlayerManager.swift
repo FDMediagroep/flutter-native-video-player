@@ -478,6 +478,10 @@ class SharedPlayerManager: NSObject {
         for (viewId, weakView) in videoPlayerViews {
             if let view = weakView.view, view.controllerId == controllerId {
                 npLog("🧹 [SharedPlayerManager] Clearing player from view \(viewId) for controllerId: \(controllerId)")
+                // Unregister while view.player still names the observed player:
+                // afterwards the view can no longer remove its KVO and time
+                // observers, and the player keeps calling into it after it's gone.
+                view.prepareForPlayerEviction()
                 view.player = nil
                 clearedViewCount += 1
             }
