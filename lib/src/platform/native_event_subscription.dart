@@ -114,11 +114,17 @@ class NativeEventSubscription {
       return null;
     }
 
+    final dynamic event;
     try {
-      onEvent(_codec.decodeEnvelope(message));
+      event = _codec.decodeEnvelope(message);
     } on PlatformException catch (e) {
       onError?.call(e);
+      return null;
     }
+
+    // Outside the try: an exception from the app's listeners is the app's
+    // error (reported by the messenger), not a native stream error.
+    onEvent(event);
     return null;
   }
 

@@ -20,6 +20,18 @@ extension VideoPlayerView {
             return
         }
 
+        // A FairPlay configuration that can never deliver keys fails the load
+        // here, before it touches the current item, media info or qualities,
+        // instead of loading until the Dart load watchdog fires.
+        if let drmConfig = arguments["drmConfig"] as? [String: Any],
+           let configurationError = VideoPlayerDrmHandler(drmConfig: drmConfig).configurationError() {
+            let message = configurationError.localizedDescription
+            npLog("🔐 DRM: \(message)")
+            sendEvent("error", data: ["message": message])
+            result(FlutterError(code: "LOAD_ERROR", message: message, details: nil))
+            return
+        }
+
         if let controllerIdValue = controllerId {
             // Evicted-player recovery: the total-player LRU cap
             // (SharedPlayerManager.maxTotalPlayers) may have torn down this
@@ -146,18 +158,6 @@ extension VideoPlayerView {
             self.drmHandler?.cleanup()
             
             let drmHandler = VideoPlayerDrmHandler(drmConfig: drmConfig)
-
-            // A FairPlay configuration that can never deliver keys fails the
-            // load now, instead of loading until the Dart load watchdog fires.
-            if let configurationError = drmHandler.configurationError() {
-                self.drmHandler = nil
-                let message = configurationError.localizedDescription
-                npLog("🔐 DRM: \(message)")
-                sendEvent("error", data: ["message": message])
-                result(FlutterError(code: "LOAD_ERROR", message: message, details: nil))
-                return
-            }
-
             self.drmHandler = drmHandler
             
             // Setup DRM asynchronously

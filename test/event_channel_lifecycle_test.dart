@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:better_native_video_player/better_native_video_player.dart';
+import 'package:better_native_video_player/src/platform/native_event_subscription.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -301,6 +304,82 @@ void main() {
 
       await arriving.dispose();
       expect(flutterErrors, isEmpty);
+    });
+  });
+
+  group('listener exceptions', () {
+    test(
+      'an exception from a listener is not reported as a stream error',
+      () async {
+        final List<Object> streamErrors = <Object>[];
+        // The app's own error goes to the messenger's error reporting (in the
+        // test harness: the zone the stream was set up in), never to the
+        // stream's onError.
+        final List<Object> appErrors = <Object>[];
+        late NativeEventSubscription subscription;
+        await runZonedGuarded(() async {
+          MockStreamHandlerEventSink? sink;
+          messenger.setMockStreamHandler(
+            const EventChannel('listener_exception_test'),
+            MockStreamHandler.inline(
+              onListen: (arguments, events) {
+                sink = events;
+              },
+            ),
+          );
+          subscription = NativeEventSubscription(
+            'listener_exception_test',
+            onEvent: (dynamic event) =>
+                throw PlatformException(code: 'APP_LISTENER'),
+            onError: streamErrors.add,
+          );
+          expect(await subscription.listen(), isTrue);
+
+          sink!.success('event');
+          await settle(20);
+        }, (Object error, StackTrace stack) => appErrors.add(error));
+
+        expect(streamErrors, isEmpty);
+        expect(
+          appErrors,
+          contains(
+            isA<PlatformException>().having(
+              (PlatformException e) => e.code,
+              'code',
+              'APP_LISTENER',
+            ),
+          ),
+        );
+        await subscription.cancel();
+        flutterErrors.clear();
+      },
+    );
+
+    test('a throwing listener does not keep a controller event from the '
+        'others with the same ID', () async {
+      mockPlugin();
+      final first = NativeVideoPlayerController(id: 43);
+      await first.debugControllerChannelSetup;
+      final second = NativeVideoPlayerController(id: 43);
+      await second.debugControllerChannelSetup;
+      await Future<void>.delayed(Duration.zero);
+      first.addControlListener(
+        (PlayerControlEvent event) => throw StateError('app listener'),
+      );
+
+      controllerSinks[43]!.success(<String, Object?>{'event': 'pipStart'});
+      await settle(20);
+
+      expect(first.isPipEnabled, isTrue);
+      expect(second.isPipEnabled, isTrue);
+      expect(
+        flutterErrors.map((FlutterErrorDetails d) => d.exception),
+        contains(isA<StateError>()),
+      );
+
+      await first.dispose();
+      await second.dispose();
+      flutterErrors.clear();
     });
   });
 }
