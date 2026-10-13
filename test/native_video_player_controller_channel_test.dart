@@ -347,6 +347,50 @@ void main() {
         });
       },
     );
+
+    testWidgets(
+      'dispose sends no view-routed calls once the last view is gone',
+      (tester) async {
+        // The widget usually unmounts before the controller is disposed.
+        // With no view left, a view-routed pause/dispose can only fail with
+        // NO_VIEW; disposeController alone stops and releases the player.
+        await tester.pumpWidget(const SizedBox());
+        final context = tester.element(find.byType(SizedBox));
+
+        await tester.runAsync(() async {
+          mockMethodChannel();
+          mockControllerStream(15);
+          MockStreamHandlerEventSink? viewSink;
+          messenger.setMockStreamHandler(
+            const EventChannel('native_video_player_413'),
+            MockStreamHandler.inline(
+              onListen: (arguments, events) {
+                viewSink = events;
+              },
+            ),
+          );
+
+          final controller = NativeVideoPlayerController(id: 15);
+          await flushSetup(controller);
+          await controller.onPlatformViewCreated(413, context);
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          viewSink!.success(<String, Object?>{'event': 'play'});
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+          expect(controller.activityState, PlayerActivityState.playing);
+
+          controller.onPlatformViewDisposed(413);
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+          log.clear();
+
+          await controller.dispose();
+
+          expect(log, isNot(contains('method:pause')));
+          expect(log, isNot(contains('method:dispose')));
+          expect(log, contains('method:disposeController'));
+          expect(flutterErrors, isEmpty);
+        });
+      },
+    );
   });
 
   group('embedded caption text scale', () {
