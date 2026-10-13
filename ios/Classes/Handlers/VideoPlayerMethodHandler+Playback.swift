@@ -133,7 +133,9 @@ extension VideoPlayerView {
             npLog("⚠️ [VideoPlayerMethodHandler] No controllerId - cannot remove from SharedPlayerManager")
         }
 
-        // Clear local player reference
+        // Clear local player reference (observers first, while they can still
+        // be removed from the player they were added to)
+        prepareForPlayerEviction()
         player = nil
         npLog("🧹 [VideoPlayerMethodHandler] Local player reference cleared")
 

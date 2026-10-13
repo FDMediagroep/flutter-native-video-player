@@ -13,6 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   DoveRunner. Binary stays the default.
 
 ### Fixed
+- **iOS: no more crash in `VideoPlayerView.sendEvent`**
+  (`objc_release ← swift_release ← _Block_release`). A queued event block
+  retained the view, and a block created while the view was deallocating
+  crashed when it was released. Events now hold a small sink instead of the
+  view, player and notification callbacks run on the main thread, and a
+  removed player no longer keeps calling into freed views (their KVO and
+  time observers are removed first).
+- **No more `MissingPluginException` or "No active stream to cancel" from
+  the event channels.** A listen or cancel on a per-view channel whose
+  native handler is already gone (the view was disposed first) is now
+  handled quietly instead of being reported to `FlutterError.onError`, and
+  no subscription is made for a view that is already gone. Controllers that
+  share an ID (the same video on two screens) share one controller-level
+  event channel; only the last one to leave tears it down.
 - **Android: players keep working when the app runs a second Flutter
   engine** (#59, #60). `firebase_messaging` starts one as soon as
   `onBackgroundMessage` is set. Every controller then logged

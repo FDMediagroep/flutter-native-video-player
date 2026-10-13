@@ -171,10 +171,9 @@ extension VideoPlayerView {
     /// Loads artwork image from URL
     private func loadArtwork(from url: URL, completion: @escaping (UIImage?) -> Void) {
         URLSession.shared.dataTask(with: url) { data, _, _ in
-            guard let data = data, let image = UIImage(data: data) else {
-                completion(nil)
-                return
-            }
+            let image = data.flatMap { UIImage(data: $0) }
+            // Also on main when there is no image: the completion resolves the
+            // weakly held view, which must not happen on this background queue.
             DispatchQueue.main.async {
                 completion(image)
             }
