@@ -1,3 +1,11 @@
+analyzer:
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    # Separate package with its own dependencies; analyze it from its own
+    # directory after `dart pub get` there.
+    - packages/**
 include: package:flutter_lints/flutter.yaml
 
 # Additional information about this file can be found at
