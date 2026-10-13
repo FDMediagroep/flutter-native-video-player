@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **FairPlay provider formats** (#55): optional Base64 certificate/CKC
+  decoding and a form-encoded SPC request, for providers such as
+  DoveRunner. Binary stays the default.
+
 ### Fixed
 - **Android: players keep working when the app runs a second Flutter
   engine** (#59, #60). `firebase_messaging` starts one as soon as
@@ -32,6 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sent `pause` and `dispose` to the view that was gone. Those calls are now
   only made while a view is alive; `disposeController` releases the native
   player either way.
+- **iOS: FairPlay generates a real SPC** (#55). It is now built from the
+  application certificate and the HLS `skd://` content identifier, so
+  content key requests no longer fail when
+  `AVContentKeyRequest.initializationData` is absent, and requests that
+  arrive while the certificate is loading are queued.
 
 ### Changed
 - **iOS Swift Package Manager: the package now depends on
