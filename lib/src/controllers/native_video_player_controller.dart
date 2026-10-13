@@ -383,6 +383,10 @@ class NativeVideoPlayerController {
   /// Track the last non-buffering activity state to restore after buffering
   PlayerActivityState? _lastNonBufferingState;
 
+  /// Whether native reported `play` since the current [load] started, so
+  /// [load] does not overwrite an autoplay `playing` with `loaded`.
+  bool _playReportedDuringLoad = false;
+
   /// Activity event handlers (play, pause, buffering, etc.)
   final List<void Function(PlayerActivityEvent)> _activityEventHandlers =
       <void Function(PlayerActivityEvent)>[];
@@ -1523,6 +1527,8 @@ class NativeVideoPlayerController {
       _sidecarSubtitles.setSources(sidecarSubtitles);
     }
 
+    _playReportedDuringLoad = false;
+
     try {
       await _methodChannel!.load(
         url: url,
@@ -1549,10 +1555,18 @@ class NativeVideoPlayerController {
       // Fetch available qualities after loading
       final qualities = await _methodChannel!.getAvailableQualities();
 
+      // With autoplay (or a play() racing the load) native has already
+      // reported `play` by now. Android sends no further play event, so
+      // writing `loaded` here would leave the state stale while it plays.
+      final bool isAlreadyPlaying =
+          _playReportedDuringLoad &&
+          _state.activityState == PlayerActivityState.playing;
       _updateState(
         _state.copyWith(
           qualities: qualities,
-          activityState: PlayerActivityState.loaded,
+          activityState: isAlreadyPlaying
+              ? PlayerActivityState.playing
+              : PlayerActivityState.loaded,
         ),
       );
 

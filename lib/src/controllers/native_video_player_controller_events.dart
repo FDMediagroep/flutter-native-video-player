@@ -376,6 +376,10 @@ extension _ControllerEventPlumbing on NativeVideoPlayerController {
                 _lastNonBufferingState = activityEvent.state;
               }
 
+              if (activityEvent.state == PlayerActivityState.playing) {
+                _playReportedDuringLoad = true;
+              }
+
               // Update activity state
               _updateState(_state.copyWith(activityState: activityEvent.state));
 
