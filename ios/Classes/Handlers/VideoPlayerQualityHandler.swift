@@ -2,12 +2,14 @@ import Foundation
 import AVFoundation
 
 class VideoPlayerQualityHandler {
+    /// Calls [completion] on the main queue: callers update view and
+    /// SharedPlayerManager state, which is main-thread only.
     static func fetchHLSQualities(from url: URL, completion: @escaping ([VideoPlayer.QualityLevel]) -> Void) {
         URLSession.shared.dataTask(with: url) { data, _, error in
             guard let data = data,
                   let playlist = String(data: data, encoding: .utf8)
             else {
-                completion([])
+                DispatchQueue.main.async { completion([]) }
                 return
             }
 
@@ -60,7 +62,7 @@ class VideoPlayerQualityHandler {
             
             // Sort qualities by resolution height (ascending)
             let sortedQualities = qualities.sorted { $0.resolution.height < $1.resolution.height }
-            completion(sortedQualities)
+            DispatchQueue.main.async { completion(sortedQualities) }
         }.resume()
     }
 }

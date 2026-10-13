@@ -19,6 +19,7 @@ import '../models/native_video_player_state.dart';
 import '../models/native_video_player_subtitle_style.dart';
 import '../models/native_video_player_subtitle_track.dart';
 import '../models/native_video_player_video_size.dart';
+import '../platform/native_event_subscription.dart';
 import '../platform/platform_utils.dart';
 import '../platform/video_player_method_channel.dart';
 import '../services/airplay_state_manager.dart';
@@ -288,8 +289,8 @@ class NativeVideoPlayerController {
   bool _isDisposed = false;
 
   /// Event channel subscriptions for each platform view
-  final Map<int, StreamSubscription<dynamic>> _eventSubscriptions =
-      <int, StreamSubscription<dynamic>>{};
+  final Map<int, NativeEventSubscription> _eventSubscriptions =
+      <int, NativeEventSubscription>{};
 
   /// MainActivity PiP event channel subscription (Android only).
   ///
@@ -302,11 +303,10 @@ class NativeVideoPlayerController {
   StreamSubscription<dynamic>? get pipEventSubscription =>
       _pipEventSubscription;
 
-  /// Controller-level event channel (persistent, independent of platform views)
-  EventChannel? _controllerEventChannel;
-
-  /// Controller-level event subscription (for PiP and AirPlay events)
-  StreamSubscription<dynamic>? _controllerEventSubscription;
+  /// Controller-level event channel (persistent, independent of platform
+  /// views; PiP, AirPlay and eviction events), shared with every other live
+  /// controller that has the same [id].
+  _SharedControllerEventChannel? _sharedControllerEventChannel;
 
   /// The shared plugin method channel, available from plugin registration
   /// (before any platform view exists). Used for controller-scoped calls
@@ -1443,9 +1443,11 @@ class NativeVideoPlayerController {
     // per-view channel handlers: on iOS the EventChannel handler strongly
     // retains the platform view, so its deinit is unreachable until the
     // handler is deregistered.
-    final subscription = _eventSubscriptions.remove(platformViewId);
+    final NativeEventSubscription? subscription = _eventSubscriptions.remove(
+      platformViewId,
+    );
     unawaited(
-      _safeCancelSubscription(subscription).then(
+      (subscription?.cancel() ?? Future<void>.value()).then(
         (_) => VideoPlayerMethodChannel.notifyViewDisposed(platformViewId),
       ),
     );
@@ -2619,10 +2621,10 @@ class NativeVideoPlayerController {
     // Cancel all event channel subscriptions
     // Create a snapshot to avoid concurrent modification during iteration
     final subscriptions = _eventSubscriptions.values.toList();
-    for (final StreamSubscription<dynamic> subscription in subscriptions) {
-      await _safeCancelSubscription(subscription);
-    }
     _eventSubscriptions.clear();
+    for (final NativeEventSubscription subscription in subscriptions) {
+      await subscription.cancel();
+    }
 
     // Cancel PiP event subscription (Android only)
     await _safeCancelSubscription(_pipEventSubscription);
@@ -2729,18 +2731,22 @@ class NativeVideoPlayerController {
     // This prevents new events from coming in while we're closing
     // Create a snapshot to avoid concurrent modification during iteration
     final subscriptions = _eventSubscriptions.values.toList();
-    for (final StreamSubscription<dynamic> subscription in subscriptions) {
-      await _safeCancelSubscription(subscription);
-    }
     _eventSubscriptions.clear();
+    for (final NativeEventSubscription subscription in subscriptions) {
+      await subscription.cancel();
+    }
 
     // Cancel PiP event subscription (Android only)
     await _safeCancelSubscription(_pipEventSubscription);
     _pipEventSubscription = null;
 
-    // Cancel controller-level event subscription
-    await _safeCancelSubscription(_controllerEventSubscription);
-    _controllerEventSubscription = null;
+    // Leave the controller-level event channel. The last controller with
+    // this ID to leave cancels the subscription and then tears the native
+    // channel down — after the cancel, so Dart's `cancel` hits a live
+    // handler, and before the native player disposal below, so no event can
+    // be emitted into a torn-down channel. Awaited so a recreate with the
+    // same controller ID starts from a clean slate.
+    await _sharedControllerEventChannel?.detach(this);
 
     // Cancel buffering debounce timer
     _bufferingDebounceTimer?.cancel();
@@ -2755,20 +2761,6 @@ class NativeVideoPlayerController {
     // Unregister method channel from AirPlay manager
     if (_methodChannel != null) {
       AirPlayStateManager.instance.unregisterMethodChannel(_methodChannel!);
-    }
-
-    // Teardown controller-level event channel on native side. This runs
-    // AFTER the subscription cancel above (so Dart's `cancel` hits a live
-    // handler) and BEFORE the native player disposal below (so no event can
-    // be emitted into a torn-down channel). Awaited so a recreate with the
-    // same controller ID starts from a clean slate.
-    try {
-      await _pluginMethodChannel.invokeMethod<void>(
-        'teardownControllerEventChannel',
-        {'controllerId': id},
-      );
-    } catch (e) {
-      debugPrint('Failed to teardown controller event channel: $e');
     }
 
     // Dispose native player resources (removes shared player from manager).

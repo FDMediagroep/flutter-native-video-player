@@ -77,12 +77,12 @@ extension VideoPlayerView {
         hasPlayerStateObservers = false
     }
 
-    /// Called by SharedPlayerManager just before the total-player LRU cap
-    /// tears down this view's shared player (see enforceTotalPlayerCap):
-    /// balances every registration made against the player and its item so
-    /// the player deallocates cleanly, and resets the bookkeeping so a later
-    /// evicted-player re-load registers fresh observers on the revived player
-    /// (handleLoad's recovery path).
+    /// Called just before this view drops its player (LRU eviction, see
+    /// enforceTotalPlayerCap, and player removal on dispose): balances every
+    /// registration made against the player and its item so the player
+    /// deallocates cleanly, and resets the bookkeeping so a later re-load
+    /// registers fresh observers on the revived player (handleLoad's recovery
+    /// path). Idempotent.
     func prepareForPlayerEviction() {
         removeItemObservers()
         removePlayerStateObservers()
@@ -336,6 +336,14 @@ extension VideoPlayerView {
     }
 
     @objc func playerItemFailedToPlay(notification: Notification) {
+        // AVPlayerItem notifications may be posted on any thread.
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.playerItemFailedToPlay(notification: notification)
+            }
+            return
+        }
+
         if let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error {
             sendEvent("error", data: ["message": error.localizedDescription])
         } else {
@@ -344,6 +352,14 @@ extension VideoPlayerView {
     }
 
     @objc func videoDidEnd() {
+        // AVPlayerItem notifications may be posted on any thread.
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.videoDidEnd()
+            }
+            return
+        }
+
         if enableLooping {
             // For smooth looping, seek to beginning and continue playing
             player?.seek(to: .zero) { [weak self] finished in
@@ -472,6 +488,15 @@ extension VideoPlayerView {
 
     /// Handles audio route changes to detect AirPlay device changes
     @objc func handleAudioRouteChange(notification: Notification) {
+        // Route changes are posted on a background thread; the handler reads
+        // the player and SharedPlayerManager, which are main-thread only.
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.handleAudioRouteChange(notification: notification)
+            }
+            return
+        }
+
         npLog("🔔 Audio route change notification received")
 
         // Log the reason for the route change

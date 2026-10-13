@@ -232,8 +232,10 @@ extension VideoPlayerView {
                 // Load ALL properties that AVMutableVideoComposition(propertiesOf:) will need
                 // This prevents synchronous property access on the main thread
                 let assetKeys = ["tracks", "duration"]
-                asset.loadValuesAsynchronously(forKeys: assetKeys) { [weak self, weak playerItem] in
-                    guard let self = self, let playerItem = playerItem else { return }
+                asset.loadValuesAsynchronously(forKeys: assetKeys) { [weak playerItem] in
+                    // No view reference here: resolving it on this background
+                    // queue could make it the view's last owner.
+                    guard let playerItem = playerItem else { return }
 
                     // Check if asset properties loaded successfully
                     for key in assetKeys {

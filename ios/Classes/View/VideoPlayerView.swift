@@ -55,7 +55,17 @@ import QuartzCore
     var player: AVPlayer?
     private var methodChannel: FlutterMethodChannel
     private var channelName: String
-    var eventSink: FlutterEventSink?
+
+    // The sink lives in its own object so sendEvent's main-queue block can
+    // hold it instead of the view: a block that retains the view keeps a
+    // dangling pointer when it is created while the view deallocates
+    // (deinit, or a KVO callback racing it), and releasing that block later
+    // crashes in objc_release.
+    private let eventSinkHolder = EventSinkHolder()
+    var eventSink: FlutterEventSink? {
+        get { eventSinkHolder.sink }
+        set { eventSinkHolder.sink = newValue }
+    }
 
     // The per-view EventChannel. Its engine-side handler registration
     // strongly retains this view (setStreamHandler(self)), which makes
@@ -779,8 +789,9 @@ import QuartzCore
                 new
             }
         }
+        let eventSinkHolder = self.eventSinkHolder
         DispatchQueue.main.async {
-            self.eventSink?(event)
+            eventSinkHolder.sink?(event)
         }
     }
 
@@ -1288,6 +1299,15 @@ import QuartzCore
 
     /// Called when audio session is interrupted (e.g., phone call, other app's audio)
     @objc func handleAudioSessionInterruption(notification: Notification) {
+        // AVAudioSession does not promise the main thread, and this handler
+        // touches the player and SharedPlayerManager, which are main-thread only.
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.handleAudioSessionInterruption(notification: notification)
+            }
+            return
+        }
+
         guard let userInfo = notification.userInfo,
               let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
@@ -1358,3 +1378,8 @@ import QuartzCore
     }
 }
 
+/// Holds a view's Flutter event sink so events dispatched to the main queue
+/// can reach it without retaining the view itself.
+final class EventSinkHolder {
+    var sink: FlutterEventSink?
+}
