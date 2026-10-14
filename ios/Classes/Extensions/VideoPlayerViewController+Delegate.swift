@@ -1,4 +1,5 @@
 import AVKit
+import Flutter
 
 extension VideoPlayerView: AVPlayerViewControllerDelegate {
     public func playerViewControllerWillStartPictureInPicture(_ playerViewController: AVPlayerViewController) {
@@ -250,6 +251,7 @@ extension VideoPlayerView: AVPlayerViewControllerDelegate {
 extension VideoPlayerView: AVPictureInPictureControllerDelegate {
     public func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         npLog("🎬 Custom PiP controller will start")
+        finishPipStart(true)
 
         // Mark PiP as active
         isPipCurrentlyActive = true
@@ -479,9 +481,29 @@ extension VideoPlayerView: AVPictureInPictureControllerDelegate {
 
     public func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {
         npLog("❌ Custom PiP controller failed to start: \(error.localizedDescription)")
+        finishPipStart(FlutterError(
+            code: "PIP_FAILED",
+            message: "Picture-in-Picture failed to start: \(error.localizedDescription)",
+            details: nil))
 
         // Ensure view is visible if PiP fails
         setInlineViewVisible()
+
+        // Undo what the manual start switched off; no did-stop follows a
+        // failed start. Otherwise the player's own PiP and automatic PiP
+        // stayed disabled after one failed attempt.
+        if let controllerIdValue = controllerId {
+            SharedPlayerManager.shared.setManualPiPActive(controllerIdValue, active: false)
+            let pipSettings = SharedPlayerManager.shared.getPipSettings(for: controllerIdValue)
+            if usesViewControllerDisplay {
+                playerViewController.allowsPictureInPicturePlayback = pipSettings?.allowsPictureInPicture ?? true
+            }
+            if #available(iOS 14.2, *),
+               canStartPictureInPictureAutomatically || pipSettings?.canStartPictureInPictureAutomatically == true {
+                SharedPlayerManager.shared.setAutomaticPiPEnabled(for: controllerIdValue, enabled: true)
+            }
+        }
+        pipController = nil
     }
     
     public func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
