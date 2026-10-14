@@ -223,7 +223,12 @@ class VideoPlayerView(
 
         // Create container view that holds the player view
         // This allows us to move the player view in/out for fullscreen
-        containerView = FrameLayout(context).apply {
+        containerView = object : FrameLayout(context) {
+            override fun onVisibilityAggregated(isVisible: Boolean) {
+                super.onVisibilityAggregated(isVisible)
+                applyInlineSurfaceVisibility(isVisible)
+            }
+        }.apply {
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
@@ -450,6 +455,8 @@ class VideoPlayerView(
 
         // Remove player view from container (important: remove from parent first!)
         (videoContentView.parent as? ViewGroup)?.removeView(videoContentView)
+        // The dialog shows the video whatever the inline container's visibility.
+        (lightSurfaceView ?: playerView?.videoSurfaceView)?.visibility = View.VISIBLE
 
         // Create fullscreen dialog with black background and no title bar
         fullscreenDialog = Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
@@ -553,6 +560,7 @@ class VideoPlayerView(
                 FrameLayout.LayoutParams.MATCH_PARENT
             ))
         }
+        applyInlineSurfaceVisibility(containerView.isShown)
 
         // Force the display view to reattach its surface to the player
         // This is necessary because moving the view between parents can disconnect the surface
@@ -641,6 +649,24 @@ class VideoPlayerView(
 
         NpLog.d(TAG, "Reconnecting surface for view $viewId (notified by another view disposal)")
         videoContentView.post { rebindVideoOutput() }
+    }
+
+    /**
+     * Shows the video surface only while the inline container is visible.
+     * Under hybrid composition Flutter hides a platform view that left the
+     * viewport by making one of its parents GONE, but a SurfaceView does not
+     * follow its parents' visibility: its surface kept drawing the video at
+     * its last position, on top of the app's UI. Only applies while the video
+     * is inline; in fullscreen it lives in the dialog.
+     */
+    private fun applyInlineSurfaceVisibility(isContainerVisible: Boolean) {
+        if (videoContentView.parent !== containerView) return
+        val surfaceView = lightSurfaceView ?: playerView?.videoSurfaceView ?: return
+        val visibility = if (isContainerVisible) View.VISIBLE else View.INVISIBLE
+        if (surfaceView.visibility != visibility) {
+            surfaceView.visibility = visibility
+            NpLog.d(TAG, "Video surface of view $viewId ${if (isContainerVisible) "shown" else "hidden"}")
+        }
     }
 
     /**
