@@ -30,6 +30,12 @@ extension _ControllerEventPlumbing on NativeVideoPlayerController {
     await channel.start(retryRegistration: true);
   }
 
+  /// Whether another live controller has this [id]. Controllers with the
+  /// same ID share one native player (the same video on two screens), so it
+  /// must outlive this one.
+  bool get _sharesNativePlayer =>
+      _SharedControllerEventChannel.hasLiveController(id);
+
   /// Safety net: makes sure the controller event channel is registered and
   /// subscribed once a platform view exists. By that point the plugin is
   /// guaranteed to be attached (it created the platform view), so a setup
@@ -593,6 +599,10 @@ class _SharedControllerEventChannel {
     channel._controllers.add(controller);
     return channel;
   }
+
+  /// Whether a live controller with [controllerId] exists.
+  static bool hasLiveController(int controllerId) =>
+      _channels[controllerId]?._hasLiveControllers ?? false;
 
   final int controllerId;
   final Future<void>? _previousTeardown;
