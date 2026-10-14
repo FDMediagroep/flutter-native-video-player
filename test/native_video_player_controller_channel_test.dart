@@ -178,6 +178,64 @@ void main() {
     });
   });
 
+  group('PiP events', () {
+    testWidgets('a PiP change reaches control listeners once', (tester) async {
+      // iOS sends each PiP change on the controller channel and on the
+      // view's channel, and a view reports the current PiP state when it
+      // attaches.
+      await tester.pumpWidget(const SizedBox());
+      final context = tester.element(find.byType(SizedBox));
+
+      await tester.runAsync(() async {
+        mockMethodChannel();
+        mockControllerStream(19);
+        MockStreamHandlerEventSink? viewSink;
+        messenger.setMockStreamHandler(
+          const EventChannel('native_video_player_416'),
+          MockStreamHandler.inline(
+            onListen: (arguments, events) {
+              viewSink = events;
+            },
+          ),
+        );
+
+        final controller = NativeVideoPlayerController(id: 19);
+        final pipEvents = <PlayerControlState>[];
+        controller.addControlListener((PlayerControlEvent event) {
+          if (event.state == PlayerControlState.pipStarted ||
+              event.state == PlayerControlState.pipStopped) {
+            pipEvents.add(event.state);
+          }
+        });
+        await flushSetup(controller);
+        await controller.onPlatformViewCreated(416, context);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+
+        viewSink!.success(<String, Object?>{'event': 'pipStop'});
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(pipEvents, isEmpty);
+
+        viewSink!.success(<String, Object?>{'event': 'pipStart'});
+        controllerSink!.success(<String, Object?>{'event': 'pipStart'});
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(controller.isPipEnabled, isTrue);
+        expect(pipEvents, <PlayerControlState>[PlayerControlState.pipStarted]);
+
+        controllerSink!.success(<String, Object?>{'event': 'pipStop'});
+        viewSink!.success(<String, Object?>{'event': 'pipStop'});
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(controller.isPipEnabled, isFalse);
+        expect(pipEvents, <PlayerControlState>[
+          PlayerControlState.pipStarted,
+          PlayerControlState.pipStopped,
+        ]);
+
+        await controller.dispose();
+        expect(flutterErrors, isEmpty);
+      });
+    });
+  });
+
   group('disposal ordering', () {
     test('cancel precedes teardown precedes native dispose', () async {
       mockMethodChannel();
@@ -387,6 +445,134 @@ void main() {
           expect(log, isNot(contains('method:pause')));
           expect(log, isNot(contains('method:dispose')));
           expect(log, contains('method:disposeController'));
+          expect(flutterErrors, isEmpty);
+        });
+      },
+    );
+
+    testWidgets(
+      'a controller sharing its ID with a live one leaves the native player '
+      'to it',
+      (tester) async {
+        // The same video on two screens: both controllers drive one native
+        // player. Disposing one must not pause or release it under the other.
+        await tester.pumpWidget(const SizedBox());
+        final context = tester.element(find.byType(SizedBox));
+
+        await tester.runAsync(() async {
+          mockMethodChannel();
+          mockControllerStream(16);
+          MockStreamHandlerEventSink? viewSink;
+          messenger.setMockStreamHandler(
+            const EventChannel('native_video_player_414'),
+            MockStreamHandler.inline(
+              onListen: (arguments, events) {
+                viewSink = events;
+              },
+            ),
+          );
+
+          final staying = NativeVideoPlayerController(id: 16);
+          await flushSetup(staying);
+          final leaving = NativeVideoPlayerController(id: 16);
+          await flushSetup(leaving);
+          await leaving.onPlatformViewCreated(414, context);
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          viewSink!.success(<String, Object?>{'event': 'play'});
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+          expect(leaving.activityState, PlayerActivityState.playing);
+          log.clear();
+
+          await leaving.dispose();
+
+          expect(log, isNot(contains('method:pause')));
+          expect(log, isNot(contains('method:dispose')));
+          expect(log, isNot(contains('method:disposeController')));
+
+          await staying.dispose();
+
+          expect(log, contains('method:disposeController'));
+          expect(flutterErrors, isEmpty);
+        });
+      },
+    );
+
+    testWidgets(
+      'a controller created while another with its ID is disposed keeps the '
+      'native player',
+      (tester) async {
+        await tester.runAsync(() async {
+          mockMethodChannel();
+          mockControllerStream(17);
+
+          final leaving = NativeVideoPlayerController(id: 17);
+          await flushSetup(leaving);
+          log.clear();
+
+          final disposing = leaving.dispose();
+          final arriving = NativeVideoPlayerController(id: 17);
+          await disposing;
+          await flushSetup(arriving);
+
+          expect(log, isNot(contains('method:disposeController')));
+
+          await arriving.dispose();
+          expect(log, contains('method:disposeController'));
+          expect(flutterErrors, isEmpty);
+        });
+      },
+    );
+
+    testWidgets(
+      'a pause the native side handled without a view reports paused',
+      (tester) async {
+        // The view the pause was routed to is gone (disposed natively first,
+        // or the app keeps the controller without a view): native pauses the
+        // shared player by controller ID and no pause event follows.
+        await tester.pumpWidget(const SizedBox());
+        final context = tester.element(find.byType(SizedBox));
+
+        await tester.runAsync(() async {
+          Map<Object?, Object?>? pauseArguments;
+          messenger.setMockMethodCallHandler(methodChannel, (call) async {
+            log.add('method:${call.method}');
+            if (call.method == 'pause') {
+              pauseArguments = call.arguments as Map<Object?, Object?>?;
+              return true;
+            }
+            if (call.method == 'getAvailableQualities') return <Object?>[];
+            return null;
+          });
+          mockControllerStream(18);
+          MockStreamHandlerEventSink? viewSink;
+          messenger.setMockStreamHandler(
+            const EventChannel('native_video_player_415'),
+            MockStreamHandler.inline(
+              onListen: (arguments, events) {
+                viewSink = events;
+              },
+            ),
+          );
+
+          final controller = NativeVideoPlayerController(id: 18);
+          final List<PlayerActivityState> states = <PlayerActivityState>[];
+          controller.addActivityListener(
+            (PlayerActivityEvent event) => states.add(event.state),
+          );
+          await flushSetup(controller);
+          await controller.onPlatformViewCreated(415, context);
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          viewSink!.success(<String, Object?>{'event': 'play'});
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+          expect(controller.activityState, PlayerActivityState.playing);
+
+          await controller.pause();
+
+          expect(pauseArguments?['controllerId'], 18);
+          expect(controller.activityState, PlayerActivityState.paused);
+          expect(states.last, PlayerActivityState.paused);
+
+          await controller.dispose();
           expect(flutterErrors, isEmpty);
         });
       },

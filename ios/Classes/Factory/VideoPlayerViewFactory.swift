@@ -176,6 +176,17 @@ import UIKit
                let viewId = args["viewId"] as? Int64,
                let view = registeredViews[viewId]?.view {
                 view.handleMethodCall(call: call, result: result)
+            } else if call.method == "pause",
+                      let args = call.arguments as? [String: Any],
+                      let controllerId = args["controllerId"] as? Int,
+                      let player = SharedPlayerManager.shared.existingPlayer(for: controllerId) {
+                // The view the pause was routed to is gone (disposed first, or
+                // the app keeps the controller without a view), but its shared
+                // player keeps playing: pause it by controller ID.
+                player.pause()
+                SharedPlayerManager.shared.setPlaybackRequested(false, for: controllerId)
+                npLog("⏸️ Paused controller \(controllerId) without a view")
+                result(true)
             } else {
                 result(FlutterError(code: "NO_VIEW", message: "No view found for method call", details: nil))
             }

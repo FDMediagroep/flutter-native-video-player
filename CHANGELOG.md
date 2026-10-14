@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **The same video on two screens keeps playing when one of them closes.**
+  Controllers with the same `id` share one native player. Disposing one of
+  them paused and released that player, so the other screen's video stopped
+  or went black. The player is now left to the remaining controller, and the
+  last controller with the ID releases it.
+- **`pause()` reaches the player when its view is gone.** The native player
+  keeps playing without a view: the engine disposes a platform view before
+  the widget's `dispose()` runs, and an app may keep a controller after its
+  view is unmounted. The pause failed with `NO_VIEW` and the audio played on.
+  It now pauses the controller's player by its ID, and the controller
+  reports `paused`.
+- **Android: a playing video that scrolled out of view no longer draws over
+  the app.** Flutter hides a hybrid-composition platform view that left the
+  viewport, but the video's `SurfaceView` does not follow its parents'
+  visibility, so it kept showing the video at its last position, for
+  example over a bottom navigation bar. The surface is now hidden with its
+  view, and shown again (playing or on the paused frame) when the view
+  returns.
+- **Android: expanding the Picture-in-Picture window back into the app no
+  longer pauses the video.** The app stays `inactive` until its window
+  regains focus, which on some devices only happens on the next touch; the
+  plugin waited for `resumed` and paused when it did not arrive. It now only
+  pauses when the PiP window was really closed (the app went to the
+  background).
+- **iOS: `enterPictureInPicture()` reports whether PiP really started.** It
+  answered `true` as soon as it asked AVKit, so a start that AVKit refused
+  read as success. It now waits for AVKit's answer and fails with
+  `PIP_FAILED` and AVKit's reason. A failed start no longer leaves the
+  player's own PiP and automatic PiP switched off.
+- **iOS: control listeners get each PiP change once.** `pipStarted` and
+  `pipStopped` arrived twice (on the view's channel and the controller's),
+  and a view that attached sent a `pipStopped` although nothing changed.
+
 ## [1.6.3] - 2026-10-14
 
 ### Added

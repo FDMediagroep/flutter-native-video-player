@@ -30,6 +30,12 @@ extension _ControllerEventPlumbing on NativeVideoPlayerController {
     await channel.start(retryRegistration: true);
   }
 
+  /// Whether another live controller has this [id]. Controllers with the
+  /// same ID share one native player (the same video on two screens), so it
+  /// must outlive this one.
+  bool get _sharesNativePlayer =>
+      _SharedControllerEventChannel.hasLiveController(id);
+
   /// Safety net: makes sure the controller event channel is registered and
   /// subscribed once a platform view exists. By that point the plugin is
   /// guaranteed to be attached (it created the platform view), so a setup
@@ -63,6 +69,12 @@ extension _ControllerEventPlumbing on NativeVideoPlayerController {
     // Handle PiP events
     if (eventName == 'pipStart' || eventName == 'pipStop') {
       final bool isPipEnabled = eventName == 'pipStart';
+
+      // iOS sends each PiP change on the view's channel too; only a change
+      // reaches listeners, once.
+      if (isPipEnabled == _state.isPipEnabled) {
+        return;
+      }
 
       debugPrint(
         'Controller-level event: $eventName (isPipEnabled=$isPipEnabled)',
@@ -495,6 +507,13 @@ extension _ControllerEventPlumbing on NativeVideoPlayerController {
         final bool isPipEnabled =
             controlEvent.state == PlayerControlState.pipStarted;
 
+        // A view reports the current PiP state when it attaches, and iOS
+        // sends each change on the controller channel too: only a change
+        // reaches listeners, once.
+        if (isPipEnabled == _state.isPipEnabled) {
+          return;
+        }
+
         // When exiting PiP, restore the custom overlay if it was hidden
         if (!isPipEnabled && _hideOverlayForPip) {
           _hideOverlayForPip = false;
@@ -593,6 +612,10 @@ class _SharedControllerEventChannel {
     channel._controllers.add(controller);
     return channel;
   }
+
+  /// Whether a live controller with [controllerId] exists.
+  static bool hasLiveController(int controllerId) =>
+      _channels[controllerId]?._hasLiveControllers ?? false;
 
   final int controllerId;
   final Future<void>? _previousTeardown;

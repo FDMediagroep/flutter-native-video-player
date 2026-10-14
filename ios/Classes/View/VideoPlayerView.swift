@@ -141,6 +141,10 @@ import QuartzCore
     // The fullscreen state last reported to Dart (see sendFullscreenChange).
     var lastSentIsFullscreen = false
 
+    // The reply to a manual PiP start, sent once AVKit reports the outcome
+    // (see awaitPipStart).
+    var pendingPipStartReply: PipStartReply?
+
     // When true, this platform view is the Dart fullscreen host and uses its own AVPlayerViewController
     // (same AVPlayer) so the inline view never loses its shared view. Cleared in deinit.
     var isDartFullscreenView: Bool = false

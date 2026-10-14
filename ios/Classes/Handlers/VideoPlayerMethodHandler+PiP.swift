@@ -115,8 +115,8 @@ extension VideoPlayerView {
 
                     if pipController.isPictureInPicturePossible {
                         npLog("🎬 Starting manual PiP now")
+                        awaitPipStart(result)
                         pipController.startPictureInPicture()
-                        result(true)
                     } else if attempt < maxAttempts {
                         // Retry after a short delay
                         npLog("   → PiP not ready yet, retrying in 0.2s...")
@@ -155,6 +155,28 @@ extension VideoPlayerView {
         } else {
             result(FlutterError(code: "NOT_SUPPORTED", message: "PiP requires iOS 14.0+", details: nil))
         }
+    }
+
+    /// Answers a manual PiP start once AVKit reports the outcome. The start
+    /// is asynchronous and can still fail after isPictureInPicturePossible
+    /// (for example when it was not started from a user action), so
+    /// answering right away reported PiP that never opened.
+    func awaitPipStart(_ result: @escaping FlutterResult) {
+        pendingPipStartReply?.send(false)
+        let reply = PipStartReply(result)
+        pendingPipStartReply = reply
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            reply.send(self?.pipController?.isPictureInPictureActive ?? false)
+            if self?.pendingPipStartReply === reply {
+                self?.pendingPipStartReply = nil
+            }
+        }
+    }
+
+    /// Answers the pending manual PiP start, if any.
+    func finishPipStart(_ value: Any?) {
+        pendingPipStartReply?.send(value)
+        pendingPipStartReply = nil
     }
 
     /// Finds the AVPlayerLayer in the view hierarchy
@@ -298,5 +320,21 @@ extension VideoPlayerView {
         } else {
             result(FlutterError(code: "NOT_SUPPORTED", message: "Automatic inline PiP requires iOS 14.2+", details: nil))
         }
+    }
+}
+
+/// A FlutterResult that is answered at most once: the PiP start reply is
+/// raced by the AVKit delegate and a timeout.
+final class PipStartReply {
+    private var result: FlutterResult?
+
+    init(_ result: @escaping FlutterResult) {
+        self.result = result
+    }
+
+    func send(_ value: Any?) {
+        guard let result = result else { return }
+        self.result = nil
+        result(value)
     }
 }

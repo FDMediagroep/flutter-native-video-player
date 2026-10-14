@@ -283,6 +283,11 @@ class SharedPlayerManager {
     }
 
     /**
+     * The live player for [controllerId], without creating one.
+     */
+    fun getExistingPlayer(controllerId: Int): ExoPlayer? = players[controllerId]
+
+    /**
      * Removes a player (called when explicitly disposed)
      */
     fun removePlayer(context: Context, controllerId: Int) {

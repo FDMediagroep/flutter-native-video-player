@@ -270,6 +270,7 @@ class NativeVideoPlayerController {
     _primaryPlatformViewId = platformViewId;
     _methodChannel = VideoPlayerMethodChannel(
       primaryPlatformViewId: platformViewId,
+      controllerId: id,
     );
 
     // Register new method channel with AirPlay manager
@@ -1692,7 +1693,13 @@ class NativeVideoPlayerController {
 
   /// Pauses video playback
   Future<void> pause() async {
-    await _methodChannel?.pause();
+    final bool pausedWithoutView = await _methodChannel?.pause() ?? false;
+    // Without a view no native pause event reaches Dart, so report it here.
+    if (pausedWithoutView &&
+        !_isDisposed &&
+        _state.activityState != PlayerActivityState.paused) {
+      _handlePlatformViewEvent(<String, Object?>{'event': 'pause'});
+    }
   }
 
   /// Seeks to a specific position
@@ -2016,31 +2023,35 @@ class NativeVideoPlayerController {
   /// button. Dismissing stops the activity without bringing the app back to
   /// the foreground, so without this the media session keeps playing audio in
   /// the background. Expanding the PiP window back into the app also flips the
-  /// PiP flag off, but Flutter only reports `resumed` after the exit animation
-  /// finishes and the window regains focus — on many devices well after a
-  /// fixed short delay. So instead of sampling the lifecycle once, wait for
-  /// `resumed` and only pause when it never arrives.
+  /// PiP flag off, but the app stays visible: Flutter reports `inactive` until
+  /// the window regains focus, which on some devices only happens on the next
+  /// touch, so waiting for `resumed` misread an expand as a dismiss. Only a
+  /// lifecycle that reports the app hidden (`hidden`/`paused`) means the
+  /// window was dismissed.
   Future<void> _pauseIfPipDismissed() async {
     const Duration pollInterval = Duration(milliseconds: 100);
-    const Duration resumeTimeout = Duration(seconds: 2);
+    const Duration dismissTimeout = Duration(seconds: 3);
 
     final Stopwatch stopwatch = Stopwatch()..start();
-    while (stopwatch.elapsed < resumeTimeout) {
+    while (stopwatch.elapsed < dismissTimeout) {
       if (_isDisposed || _state.isPipEnabled) {
         return;
       }
-      if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
-        return;
+      switch (WidgetsBinding.instance.lifecycleState) {
+        case AppLifecycleState.resumed:
+          return;
+        case AppLifecycleState.hidden:
+        case AppLifecycleState.paused:
+        case AppLifecycleState.detached:
+          debugPrint('PiP window dismissed while app is backgrounded — pausing');
+          await pause();
+          return;
+        case AppLifecycleState.inactive:
+        case null:
+          break;
       }
       await Future<void>.delayed(pollInterval);
     }
-
-    if (_isDisposed || _state.isPipEnabled) {
-      return;
-    }
-
-    debugPrint('PiP window dismissed while app is backgrounded — pausing');
-    await pause();
   }
 
   /// Maps URL sources for Android's native sideloading; null on other
@@ -2716,7 +2727,10 @@ class NativeVideoPlayerController {
     // Pause playback first to avoid crashes during disposal. Without a live
     // view (the widget usually unmounts first) the view-routed pause can only
     // fail with NO_VIEW; disposeController below stops the player instead.
-    if (_platformViewIds.isNotEmpty && _state.activityState.isPlaying) {
+    // Not while another controller with this ID still shows the player.
+    if (_platformViewIds.isNotEmpty &&
+        _state.activityState.isPlaying &&
+        !_sharesNativePlayer) {
       await pause();
       // Give the native side a moment to process the pause
       await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -2763,26 +2777,11 @@ class NativeVideoPlayerController {
       AirPlayStateManager.instance.unregisterMethodChannel(_methodChannel!);
     }
 
-    // Dispose native player resources (removes shared player from manager).
-    // Skipped without a live view for the same reason as the pause above.
-    if (_methodChannel != null && _platformViewIds.isNotEmpty) {
-      await _methodChannel?.dispose();
-    }
-
-    // ALWAYS release by controller ID as the authoritative cleanup: the
-    // view-routed dispose above races platform-view teardown when a feed
-    // tile is unmounted (the call lands after the view unregistered →
-    // NO_VIEW → silently dropped), which leaked one native player per
-    // disposed controller until the OS killed the app (observed as an OOM
-    // on a Galaxy S21 after a few six-player feed visits). disposeController
-    // needs no view, and native removePlayer is idempotent on both
-    // platforms, so running it after a successful view dispose is harmless.
-    try {
-      await _pluginMethodChannel.invokeMethod<void>('disposeController', {
-        'controllerId': id,
-      });
-    } catch (e) {
-      debugPrint('Failed to dispose native player for controller $id: $e');
+    // Another live controller with this ID (the same video on two screens)
+    // shares the native player: leave it to that controller. The last
+    // controller with the ID releases it.
+    if (!_sharesNativePlayer) {
+      await _releaseNativePlayer();
     }
 
     // Close all stream controllers
@@ -2815,6 +2814,32 @@ class NativeVideoPlayerController {
     _methodChannel = null;
     _url = null;
     _initializeCompleter = null;
+  }
+
+  /// Releases the native player for [id].
+  Future<void> _releaseNativePlayer() async {
+    // Dispose native player resources (removes shared player from manager).
+    // Skipped without a live view for the same reason as the pause in
+    // [dispose].
+    if (_methodChannel != null && _platformViewIds.isNotEmpty) {
+      await _methodChannel?.dispose();
+    }
+
+    // ALWAYS release by controller ID as the authoritative cleanup: the
+    // view-routed dispose above races platform-view teardown when a feed
+    // tile is unmounted (the call lands after the view unregistered →
+    // NO_VIEW → silently dropped), which leaked one native player per
+    // disposed controller until the OS killed the app (observed as an OOM
+    // on a Galaxy S21 after a few six-player feed visits). disposeController
+    // needs no view, and native removePlayer is idempotent on both
+    // platforms, so running it after a successful view dispose is harmless.
+    try {
+      await _pluginMethodChannel.invokeMethod<void>('disposeController', {
+        'controllerId': id,
+      });
+    } catch (e) {
+      debugPrint('Failed to dispose native player for controller $id: $e');
+    }
   }
 
   /// Internal method to emit pipStarted event (hides overlay before PiP)
