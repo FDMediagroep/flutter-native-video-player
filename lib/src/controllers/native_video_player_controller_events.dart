@@ -70,6 +70,12 @@ extension _ControllerEventPlumbing on NativeVideoPlayerController {
     if (eventName == 'pipStart' || eventName == 'pipStop') {
       final bool isPipEnabled = eventName == 'pipStart';
 
+      // iOS sends each PiP change on the view's channel too; only a change
+      // reaches listeners, once.
+      if (isPipEnabled == _state.isPipEnabled) {
+        return;
+      }
+
       debugPrint(
         'Controller-level event: $eventName (isPipEnabled=$isPipEnabled)',
       );
@@ -500,6 +506,13 @@ extension _ControllerEventPlumbing on NativeVideoPlayerController {
           controlEvent.state == PlayerControlState.pipStopped) {
         final bool isPipEnabled =
             controlEvent.state == PlayerControlState.pipStarted;
+
+        // A view reports the current PiP state when it attaches, and iOS
+        // sends each change on the controller channel too: only a change
+        // reaches listeners, once.
+        if (isPipEnabled == _state.isPipEnabled) {
+          return;
+        }
 
         // When exiting PiP, restore the custom overlay if it was hidden
         if (!isPipEnabled && _hideOverlayForPip) {

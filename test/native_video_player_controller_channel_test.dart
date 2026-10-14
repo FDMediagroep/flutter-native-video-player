@@ -178,6 +178,64 @@ void main() {
     });
   });
 
+  group('PiP events', () {
+    testWidgets('a PiP change reaches control listeners once', (tester) async {
+      // iOS sends each PiP change on the controller channel and on the
+      // view's channel, and a view reports the current PiP state when it
+      // attaches.
+      await tester.pumpWidget(const SizedBox());
+      final context = tester.element(find.byType(SizedBox));
+
+      await tester.runAsync(() async {
+        mockMethodChannel();
+        mockControllerStream(19);
+        MockStreamHandlerEventSink? viewSink;
+        messenger.setMockStreamHandler(
+          const EventChannel('native_video_player_416'),
+          MockStreamHandler.inline(
+            onListen: (arguments, events) {
+              viewSink = events;
+            },
+          ),
+        );
+
+        final controller = NativeVideoPlayerController(id: 19);
+        final pipEvents = <PlayerControlState>[];
+        controller.addControlListener((PlayerControlEvent event) {
+          if (event.state == PlayerControlState.pipStarted ||
+              event.state == PlayerControlState.pipStopped) {
+            pipEvents.add(event.state);
+          }
+        });
+        await flushSetup(controller);
+        await controller.onPlatformViewCreated(416, context);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+
+        viewSink!.success(<String, Object?>{'event': 'pipStop'});
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(pipEvents, isEmpty);
+
+        viewSink!.success(<String, Object?>{'event': 'pipStart'});
+        controllerSink!.success(<String, Object?>{'event': 'pipStart'});
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(controller.isPipEnabled, isTrue);
+        expect(pipEvents, <PlayerControlState>[PlayerControlState.pipStarted]);
+
+        controllerSink!.success(<String, Object?>{'event': 'pipStop'});
+        viewSink!.success(<String, Object?>{'event': 'pipStop'});
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(controller.isPipEnabled, isFalse);
+        expect(pipEvents, <PlayerControlState>[
+          PlayerControlState.pipStarted,
+          PlayerControlState.pipStopped,
+        ]);
+
+        await controller.dispose();
+        expect(flutterErrors, isEmpty);
+      });
+    });
+  });
+
   group('disposal ordering', () {
     test('cancel precedes teardown precedes native dispose', () async {
       mockMethodChannel();
