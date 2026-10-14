@@ -2023,31 +2023,35 @@ class NativeVideoPlayerController {
   /// button. Dismissing stops the activity without bringing the app back to
   /// the foreground, so without this the media session keeps playing audio in
   /// the background. Expanding the PiP window back into the app also flips the
-  /// PiP flag off, but Flutter only reports `resumed` after the exit animation
-  /// finishes and the window regains focus — on many devices well after a
-  /// fixed short delay. So instead of sampling the lifecycle once, wait for
-  /// `resumed` and only pause when it never arrives.
+  /// PiP flag off, but the app stays visible: Flutter reports `inactive` until
+  /// the window regains focus, which on some devices only happens on the next
+  /// touch, so waiting for `resumed` misread an expand as a dismiss. Only a
+  /// lifecycle that reports the app hidden (`hidden`/`paused`) means the
+  /// window was dismissed.
   Future<void> _pauseIfPipDismissed() async {
     const Duration pollInterval = Duration(milliseconds: 100);
-    const Duration resumeTimeout = Duration(seconds: 2);
+    const Duration dismissTimeout = Duration(seconds: 3);
 
     final Stopwatch stopwatch = Stopwatch()..start();
-    while (stopwatch.elapsed < resumeTimeout) {
+    while (stopwatch.elapsed < dismissTimeout) {
       if (_isDisposed || _state.isPipEnabled) {
         return;
       }
-      if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
-        return;
+      switch (WidgetsBinding.instance.lifecycleState) {
+        case AppLifecycleState.resumed:
+          return;
+        case AppLifecycleState.hidden:
+        case AppLifecycleState.paused:
+        case AppLifecycleState.detached:
+          debugPrint('PiP window dismissed while app is backgrounded — pausing');
+          await pause();
+          return;
+        case AppLifecycleState.inactive:
+        case null:
+          break;
       }
       await Future<void>.delayed(pollInterval);
     }
-
-    if (_isDisposed || _state.isPipEnabled) {
-      return;
-    }
-
-    debugPrint('PiP window dismissed while app is backgrounded — pausing');
-    await pause();
   }
 
   /// Maps URL sources for Android's native sideloading; null on other
