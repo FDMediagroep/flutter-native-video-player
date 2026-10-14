@@ -7,10 +7,16 @@ import '../models/native_video_player_subtitle_track.dart';
 
 /// Handles all method channel communication with the native platform
 class VideoPlayerMethodChannel {
-  VideoPlayerMethodChannel({required this.primaryPlatformViewId})
-    : _methodChannel = const MethodChannel('native_video_player');
+  VideoPlayerMethodChannel({
+    required this.primaryPlatformViewId,
+    this.controllerId,
+  }) : _methodChannel = const MethodChannel('native_video_player');
 
   final int primaryPlatformViewId;
+
+  /// The controller ID, sent with [pause] so the native side can still reach
+  /// the controller's shared player when the view is gone.
+  final int? controllerId;
   final MethodChannel _methodChannel;
 
   /// Creates a texture-rendered backend (Android `androidTextureMode`).
@@ -157,14 +163,23 @@ class VideoPlayerMethodChannel {
     }
   }
 
-  /// Pauses video playback
-  Future<void> pause() async {
+  /// Pauses video playback.
+  ///
+  /// Returns true when the native side paused the controller's player
+  /// without a view: no `pause` event follows then.
+  Future<bool> pause() async {
     try {
-      await _methodChannel.invokeMethod<void>('pause', <String, Object>{
-        'viewId': primaryPlatformViewId,
-      });
+      final bool? pausedWithoutView = await _methodChannel.invokeMethod<bool>(
+        'pause',
+        <String, Object>{
+          'viewId': primaryPlatformViewId,
+          'controllerId': ?controllerId,
+        },
+      );
+      return pausedWithoutView ?? false;
     } catch (e) {
       debugPrint('Error calling pause: $e');
+      return false;
     }
   }
 

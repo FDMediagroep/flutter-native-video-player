@@ -270,6 +270,7 @@ class NativeVideoPlayerController {
     _primaryPlatformViewId = platformViewId;
     _methodChannel = VideoPlayerMethodChannel(
       primaryPlatformViewId: platformViewId,
+      controllerId: id,
     );
 
     // Register new method channel with AirPlay manager
@@ -1692,7 +1693,13 @@ class NativeVideoPlayerController {
 
   /// Pauses video playback
   Future<void> pause() async {
-    await _methodChannel?.pause();
+    final bool pausedWithoutView = await _methodChannel?.pause() ?? false;
+    // Without a view no native pause event reaches Dart, so report it here.
+    if (pausedWithoutView &&
+        !_isDisposed &&
+        _state.activityState != PlayerActivityState.paused) {
+      _handlePlatformViewEvent(<String, Object?>{'event': 'pause'});
+    }
   }
 
   /// Seeks to a specific position

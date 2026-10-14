@@ -490,6 +490,12 @@ class SharedPlayerManager: NSObject {
         npLog("✅ [SharedPlayerManager] Stopped all views (\(clearedViewCount) views) for controller ID: \(controllerId)")
     }
 
+    /// The live player for [controllerId], without creating one.
+    func existingPlayer(for controllerId: Int) -> AVPlayer? {
+        assertMainThread()
+        return players[controllerId]
+    }
+
     /// Removes a player (called when explicitly disposed)
     func removePlayer(for controllerId: Int) {
         assertMainThread()

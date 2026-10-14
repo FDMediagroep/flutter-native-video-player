@@ -240,6 +240,8 @@ class NativeVideoPlayerPlugin(
 
             if (view != null) {
                 view.handleMethodCall(call, result)
+            } else if (call.method == "pause" && pauseWithoutView(args)) {
+                result.success(true)
             } else {
                 result.error("NO_VIEW", "No view found for method call", null)
             }
@@ -290,6 +292,20 @@ class NativeVideoPlayerPlugin(
         }
 
         NpLog.d(TAG, "NativeVideoPlayerPlugin registered with id: $VIEW_TYPE")
+    }
+
+    /**
+     * Pauses a controller's player when the view a pause was routed to is
+     * gone. The engine disposes a platform view before the widget's dispose
+     * runs, and an app may keep a controller without any view; the shared
+     * player keeps playing in both cases, so the pause must still reach it.
+     */
+    private fun pauseWithoutView(args: Map<*, *>?): Boolean {
+        val controllerId = (args?.get("controllerId") as? Number)?.toInt() ?: return false
+        val player = sharedPlayerManager.getExistingPlayer(controllerId) ?: return false
+        player.pause()
+        NpLog.d(TAG, "Paused controller $controllerId without a view")
+        return true
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
