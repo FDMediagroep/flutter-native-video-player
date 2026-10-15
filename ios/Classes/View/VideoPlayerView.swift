@@ -71,7 +71,7 @@ import QuartzCore
     // strongly retains this view (setStreamHandler(self)), which makes
     // deinit unreachable until tearDownChannels() deregisters it.
     private var eventChannel: FlutterEventChannel?
-    private var channelsTornDown = false
+    private(set) var channelsTornDown = false
 
     // KVO bookkeeping so teardown removes exactly what was registered:
     // removing a never-registered observer throws NSRangeException, and the
@@ -93,6 +93,9 @@ import QuartzCore
 
     // Track if PiP is currently active (for both automatic and manual PiP)
     var isPipCurrentlyActive: Bool = false
+
+    /// Whether the player was playing when the PiP window started closing.
+    var wasPlayingWhenPipStopped = false
 
     // Track if we're currently in the middle of a PiP restoration
     // This is true from when restoreUserInterfaceForPictureInPictureStop is called

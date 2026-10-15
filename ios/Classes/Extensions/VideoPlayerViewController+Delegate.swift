@@ -65,6 +65,7 @@ extension VideoPlayerView: AVPlayerViewControllerDelegate {
     }
 
     public func playerViewControllerWillStopPictureInPicture(_ playerViewController: AVPlayerViewController) {
+        wasPlayingWhenPipStopped = player?.rate ?? 0 > 0
         npLog("🎬 PiP will stop (AVPlayerViewController delegate) on view \(viewId)")
 
         // Determine if this was a manual or automatic PiP stop
@@ -181,6 +182,8 @@ extension VideoPlayerView: AVPlayerViewControllerDelegate {
                 break
             }
         }
+
+        releaseIfKeptForPip()
     }
 
     public func playerViewController(_ playerViewController: AVPlayerViewController, failedToStartPictureInPictureWithError error: Error) {
@@ -315,6 +318,7 @@ extension VideoPlayerView: AVPictureInPictureControllerDelegate {
     }
     
     public func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        wasPlayingWhenPipStopped = player?.rate ?? 0 > 0
         npLog("🎬 Custom PiP controller will stop on view \(viewId)")
 
         // Send pipStop event BEFORE PiP actually stops
@@ -477,6 +481,8 @@ extension VideoPlayerView: AVPictureInPictureControllerDelegate {
                 break
             }
         }
+
+        releaseIfKeptForPip()
     }
 
     public func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, failedToStartPictureInPictureWithError error: Error) {

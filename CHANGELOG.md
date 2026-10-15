@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **iOS: PiP keeps playing after its screen closes.** Disposing the platform
+  view released the native view that owns the PiP controller (and is its
+  delegate), and its `deinit` stopped PiP: the window disappeared while the
+  player played on without a view. A view whose PiP window is open is now kept
+  until the window closes. Closing it (X, or "back to app" without a screen to
+  return to) pauses the player; when the screen was opened again, playback
+  goes on there. Disposing the controller also closes the window.
 - **iOS: `enterPictureInPicture()` right after `exitFullScreen()` opens PiP.**
   With a custom overlay, fullscreen is a Flutter route with its own platform
   view. `exitFullScreen()` only starts that route's pop, and until its fade-out
