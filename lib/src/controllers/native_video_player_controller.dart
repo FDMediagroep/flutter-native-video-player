@@ -1474,6 +1474,14 @@ class NativeVideoPlayerController {
       _updateMethodChannel(newPrimaryViewId);
     }
 
+    // AirPlay commands are routed to the channel's view. A controller that
+    // outlives its last view (PiP, AirPlay, an app holding it) would answer
+    // them with "no view" while other controllers have one. It registers
+    // again when a view attaches (see _updateMethodChannel).
+    if (_platformViewIds.isEmpty && _methodChannel != null) {
+      AirPlayStateManager.instance.unregisterMethodChannel(_methodChannel!);
+    }
+
     if (_fullscreenViewIds.remove(platformViewId) &&
         _fullscreenViewIds.isEmpty) {
       _completeFullscreenViewsDisposed();

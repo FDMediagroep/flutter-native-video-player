@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **iOS: the AirPlay picker opens after another video's screen closed.**
+  `AirPlayStateManager` sends AirPlay actions (picker, disconnect) through
+  the first registered controller, and they are routed to that controller's
+  view. A controller kept alive after its last view closed (PiP, AirPlay, or
+  an app holding it) stayed registered, so the picker went to a view that no
+  longer existed and nothing happened. Such a controller now unregisters, and
+  registers again when a view attaches.
+
 ## [1.6.6] - 2026-10-15
 
 ### Fixed
