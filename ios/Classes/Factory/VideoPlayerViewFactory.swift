@@ -96,7 +96,14 @@ import UIKit
                 // views it also drops the plugin's strong reference.
                 if let args = call.arguments as? [String: Any],
                    let viewId = args["viewId"] as? Int64 {
-                    registeredViews[viewId]?.view?.tearDownChannels()
+                    if let view = registeredViews[viewId]?.view {
+                        // An open PiP window outlives its screen: the view is
+                        // its delegate, so keep it until the window closes.
+                        if view.isPipCurrentlyActive {
+                            SharedPlayerManager.shared.keepViewForPip(view)
+                        }
+                        view.tearDownChannels()
+                    }
                     registeredViews.removeValue(forKey: viewId)
                     textureViews.removeValue(forKey: viewId)
                 }

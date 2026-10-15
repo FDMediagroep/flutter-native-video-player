@@ -74,6 +74,11 @@ class SharedPlayerManager: NSObject {
     /// Key is a unique identifier (viewId), value is the view
     private var videoPlayerViews: [String: WeakVideoPlayerViewWrapper] = [:]
 
+    /// Views whose platform view was disposed while their PiP window was open.
+    /// The view is the PiP delegate and owns the PiP controller, so it is kept
+    /// until the window closes: PiP keeps playing after its screen is gone.
+    private var viewsKeptForPip: [Int64: VideoPlayerView] = [:]
+
     /// Store PiP settings for each controller
     /// This ensures PiP settings persist across all views using the same controller
     private var pipSettings: [Int: PipSettings] = [:]
@@ -477,6 +482,11 @@ class SharedPlayerManager: NSObject {
         var clearedViewCount = 0
         for (viewId, weakView) in videoPlayerViews {
             if let view = weakView.view, view.controllerId == controllerId {
+                // A PiP window (also one of a view kept after its screen
+                // closed) must not stay open on a released player.
+                if let pipController = view.pipController, pipController.isPictureInPictureActive {
+                    pipController.stopPictureInPicture()
+                }
                 npLog("🧹 [SharedPlayerManager] Clearing player from view \(viewId) for controllerId: \(controllerId)")
                 // Unregister while view.player still names the observed player:
                 // afterwards the view can no longer remove its KVO and time
@@ -687,6 +697,21 @@ class SharedPlayerManager: NSObject {
         npLog("   → Registered view with ID \(viewId), total views: \(videoPlayerViews.count)")
     }
     
+    /// Keeps a disposed view alive while its PiP window is open.
+    func keepViewForPip(_ view: VideoPlayerView) {
+        assertMainThread()
+        viewsKeptForPip[view.viewId] = view
+        npLog("   → Keeping view \(view.viewId) alive while its PiP window is open")
+    }
+
+    /// Releases a view kept by [keepViewForPip] once its PiP window closed.
+    func releaseViewKeptForPip(_ viewId: Int64) {
+        assertMainThread()
+        if viewsKeptForPip.removeValue(forKey: viewId) != nil {
+            npLog("   → Released view \(viewId) kept for its PiP window")
+        }
+    }
+
     /// Unregister a VideoPlayerView when it's disposed
     func unregisterVideoPlayerView(viewId: Int64) {
         assertMainThread()

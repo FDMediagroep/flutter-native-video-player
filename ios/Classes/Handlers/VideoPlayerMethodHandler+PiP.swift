@@ -179,6 +179,31 @@ extension VideoPlayerView {
         pendingPipStartReply = nil
     }
 
+    /// Lets a view kept for its PiP window go once that window closed (see
+    /// `SharedPlayerManager.keepViewForPip`). Without another view of its
+    /// controller on screen the player pauses: no audio without a player.
+    /// With one (the screen was opened again), playback goes on there: AVKit
+    /// pauses when the window returns to this view's off-screen layer.
+    func releaseIfKeptForPip() {
+        guard channelsTornDown else { return }
+
+        if let controllerIdValue = controllerId {
+            if SharedPlayerManager.shared.findAnotherViewForController(controllerIdValue, excluding: viewId) == nil {
+                npLog("⏸️ PiP closed after view \(viewId) was disposed - pausing controller \(controllerIdValue)")
+                player?.pause()
+            } else if wasPlayingWhenPipStopped {
+                npLog("▶️ PiP of disposed view \(viewId) closed - playing on in another view of controller \(controllerIdValue)")
+                player?.play()
+            }
+        }
+
+        // Next turn: the AVKit delegate call that got here still runs on this view.
+        let viewId = self.viewId
+        DispatchQueue.main.async {
+            SharedPlayerManager.shared.releaseViewKeptForPip(viewId)
+        }
+    }
+
     /// Finds the AVPlayerLayer in the view hierarchy
     func findPlayerLayer() -> AVPlayerLayer? {
         // Texture views have no on-screen layer (the fix-layer is zero-sized
