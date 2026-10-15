@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 import '../platform/platform_utils.dart';
 import '../platform/video_player_method_channel.dart';
 
@@ -60,7 +62,8 @@ class AirPlayStateManager {
     }
   }
 
-  /// Unregisters a method channel when a controller is disposed
+  /// Unregisters a method channel when its controller is disposed or has no
+  /// platform view left
   void unregisterMethodChannel(VideoPlayerMethodChannel channel) {
     _registeredChannels.remove(channel);
   }
@@ -69,6 +72,10 @@ class AirPlayStateManager {
   VideoPlayerMethodChannel? get _anyMethodChannel {
     return _registeredChannels.isNotEmpty ? _registeredChannels.first : null;
   }
+
+  /// The channel AirPlay actions (picker, disconnect) are sent through.
+  @visibleForTesting
+  VideoPlayerMethodChannel? get debugActionChannel => _anyMethodChannel;
 
   /// Whether AirPlay is available on the device
   bool get isAirPlayAvailable => _isAirPlayAvailable;
