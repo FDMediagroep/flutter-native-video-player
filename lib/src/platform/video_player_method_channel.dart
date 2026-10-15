@@ -370,6 +370,27 @@ class VideoPlayerMethodChannel {
     }
   }
 
+  /// Whether a PiP window of this controller is open (iOS).
+  ///
+  /// Asked by controller ID: the window can outlive the view that opened it.
+  /// Returns null without a controller ID or when the call fails.
+  Future<bool?> isPictureInPictureActive() async {
+    final int? id = controllerId;
+    if (id == null) {
+      return null;
+    }
+
+    try {
+      return await _methodChannel.invokeMethod<bool>(
+        'isPictureInPictureActive',
+        <String, Object>{'controllerId': id},
+      );
+    } catch (e) {
+      debugPrint('Error checking PiP status: $e');
+      return null;
+    }
+  }
+
   /// Enters Picture-in-Picture mode
   Future<bool> enterPictureInPicture() async {
     try {

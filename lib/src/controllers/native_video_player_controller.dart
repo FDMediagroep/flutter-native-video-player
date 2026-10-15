@@ -1999,10 +1999,32 @@ class NativeVideoPlayerController {
   /// queries the platform's `isInPictureInPictureMode` directly and
   /// refreshes the synchronous flag with the result; pause decisions made
   /// on lifecycle transitions (see BackgroundPlaybackGuard) must use this
-  /// instead of [isPipEnabled]. Falls back to the last known flag if the
-  /// platform query fails.
+  /// instead of [isPipEnabled].
+  ///
+  /// On iOS it asks the native views of this controller, including a view
+  /// kept alive only for its open window, and replays a `pipStop` event that
+  /// never reached Dart. It never reopens PiP: `pipStop` is sent before the
+  /// window finishes closing, so a query in between still finds it open.
+  ///
+  /// Falls back to the last known flag if the platform query fails.
   Future<bool> getPictureInPictureStatus() async {
-    if (kIsWeb || _isDisposed || !Platform.isAndroid) {
+    if (kIsWeb || _isDisposed) {
+      return _state.isPipEnabled;
+    }
+
+    if (Platform.isIOS) {
+      final bool? isPictureInPictureActive = await _methodChannel
+          ?.isPictureInPictureActive();
+      if (isPictureInPictureActive == false && _state.isPipEnabled) {
+        _handleControllerEvent(<String, Object>{
+          'event': 'pipStop',
+          'isPictureInPicture': false,
+        });
+      }
+      return _state.isPipEnabled;
+    }
+
+    if (!Platform.isAndroid) {
       return _state.isPipEnabled;
     }
 

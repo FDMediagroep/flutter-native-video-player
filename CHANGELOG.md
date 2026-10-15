@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **iOS: `getPictureInPictureStatus()` asks the native side.** It returned
+  the last `pipStart`/`pipStop` event, so a `pipStop` that never reached Dart
+  left `isPipEnabled` on forever, for example after the window outlived its
+  screen. It now asks the controller's native views, including a view kept
+  alive for its open window, and replays the missed `pipStop`. It only clears
+  the flag: `pipStop` is sent before the window finishes closing.
+
 ## [1.6.5] - 2026-10-15
 
 ### Fixed
