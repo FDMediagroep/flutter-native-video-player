@@ -164,6 +164,20 @@ import UIKit
                 return
             }
 
+            if call.method == "isPictureInPictureActive" {
+                // Answered by controller ID: a PiP window outlives the view
+                // that opened it (keepViewForPip), and the Dart side asks to
+                // catch a pipStop event that never reached it. The flag is
+                // set by AVKit's delegate callbacks on every view.
+                if let args = call.arguments as? [String: Any],
+                   let controllerId = args["controllerId"] as? Int {
+                    result(SharedPlayerManager.shared.isPipActiveForController(controllerId))
+                } else {
+                    result(FlutterError(code: "INVALID_ARGUMENT", message: "Controller ID is required", details: nil))
+                }
+                return
+            }
+
             if call.method == "disposeController" {
                 // Releases the shared native player by controller ID. Used by Dart
                 // dispose() when no platform view is alive (after releaseResources())
