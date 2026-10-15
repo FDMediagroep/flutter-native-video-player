@@ -423,6 +423,13 @@ class NativeVideoPlayerController {
   /// Android/iOS view exists for them). Drives the Dart-fullscreen fallback.
   final Set<int> _textureViewIds = <int>{};
 
+  /// Platform-view IDs hosted by the Dart fullscreen route.
+  final Set<int> _fullscreenViewIds = <int>{};
+
+  /// Completes once the last Dart fullscreen view is disposed, for
+  /// [_waitForClosingFullscreenViews].
+  Completer<void>? _fullscreenViewsDisposed;
+
   /// Whether the active fullscreen session went through the Dart path (so
   /// exit uses the matching path even without a custom overlay).
   bool _usedDartFullscreen = false;
@@ -1147,6 +1154,12 @@ class NativeVideoPlayerController {
     _textureViewIds.add(platformViewId);
   }
 
+  /// Internal: called by [NativeVideoPlayer] before [onPlatformViewCreated]
+  /// for the view inside the Dart fullscreen route.
+  void registerFullscreenView(int platformViewId) {
+    _fullscreenViewIds.add(platformViewId);
+  }
+
   /// Whether the primary view is a texture-rendered backend.
   bool get _primaryViewIsTexture =>
       _primaryPlatformViewId != null &&
@@ -1459,6 +1472,37 @@ class NativeVideoPlayerController {
       // Use the most recent remaining view
       final newPrimaryViewId = _platformViewIds.last;
       _updateMethodChannel(newPrimaryViewId);
+    }
+
+    if (_fullscreenViewIds.remove(platformViewId) &&
+        _fullscreenViewIds.isEmpty) {
+      _completeFullscreenViewsDisposed();
+    }
+  }
+
+  /// Waits for a closing Dart fullscreen route to dispose its platform view.
+  ///
+  /// [exitFullScreen] only starts the route's pop. Until its fade-out ends,
+  /// the fullscreen view stays the primary view, so iOS PiP requested right
+  /// after leaving fullscreen started on that view's layer and ended when the
+  /// view was disposed: the first tap only closed fullscreen.
+  Future<void> _waitForClosingFullscreenViews() async {
+    if (_state.isFullScreen || _fullscreenViewIds.isEmpty) {
+      return;
+    }
+
+    final completer = _fullscreenViewsDisposed ??= Completer<void>();
+    await completer.future.timeout(
+      const Duration(seconds: 1),
+      onTimeout: () {},
+    );
+  }
+
+  void _completeFullscreenViewsDisposed() {
+    final completer = _fullscreenViewsDisposed;
+    _fullscreenViewsDisposed = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete();
     }
   }
 
@@ -2182,6 +2226,10 @@ class NativeVideoPlayerController {
       }
     }
 
+    // iOS: a PiP request right after exitFullScreen must reach the inline
+    // view, not the fullscreen view that is about to be disposed.
+    await _waitForClosingFullscreenViews();
+
     // iOS: PiP needs an on-screen AVPlayerLayer. A texture-rendered tile
     // has none — swap it to a platform view first (same shared player and
     // position, visually seamless); the tile stays a platform view after.
@@ -2662,6 +2710,8 @@ class NativeVideoPlayerController {
     // Clear platform view references
     _platformViewIds.clear();
     _platformViewContexts.clear();
+    _fullscreenViewIds.clear();
+    _completeFullscreenViewsDisposed();
     _primaryPlatformViewId = null;
 
     // Clear method channel reference (but don't dispose native player)
@@ -2804,6 +2854,8 @@ class NativeVideoPlayerController {
     _platformViewIds.clear();
     _platformViewContexts.clear();
     _textureViewIds.clear();
+    _fullscreenViewIds.clear();
+    _completeFullscreenViewsDisposed();
     _primaryPlatformViewId = null;
 
     // Clear overlay and fullscreen references

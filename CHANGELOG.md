@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **iOS: `enterPictureInPicture()` right after `exitFullScreen()` opens PiP.**
+  With a custom overlay, fullscreen is a Flutter route with its own platform
+  view. `exitFullScreen()` only starts that route's pop, and until its fade-out
+  ends the fullscreen view stays the primary view. The PiP request went to that
+  view and ended when the view was disposed, so the first tap only closed
+  fullscreen and a second tap was needed. The request now waits (at most a
+  second) for the fullscreen view to go and starts PiP on the inline view.
+
 ## [1.6.4] - 2026-10-14
 
 ### Fixed

@@ -265,6 +265,9 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
   /// Called when the platform view is created
   Future<void> _onPlatformViewCreated(int id) async {
     _platformViewId = id;
+    if (widget.isFullscreenContext) {
+      widget.controller.registerFullscreenView(id);
+    }
     await widget.controller.onPlatformViewCreated(id, context);
     // The first layout usually happens before the platform view exists, so
     // report the viewport size now that there is a native receiver.
