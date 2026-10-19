@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 
 import '../config/native_video_player_config.dart';
 import '../enums/native_video_player_event.dart';
+import '../fullscreen/fullscreen_hero_transition.dart';
 import '../fullscreen/fullscreen_manager.dart';
 import '../fullscreen/fullscreen_video_player.dart';
 import '../models/native_video_player_audio_track.dart';
@@ -66,6 +67,7 @@ class NativeVideoPlayerController {
     this.enableLooping = false,
     this.showNativeControls = true,
     this.preventFullscreenSwipeDismiss = true,
+    this.fullscreenFlightBorderRadius = BorderRadius.zero,
     List<DeviceOrientation>? preferredOrientations,
   }) {
     // Set preferred orientations if provided
@@ -165,6 +167,12 @@ class NativeVideoPlayerController {
   /// gesture. Has no effect on Android or on Dart-side (custom overlay)
   /// fullscreen.
   final bool preventFullscreenSwipeDismiss;
+
+  /// Corners of the inline player the video flies from into Dart fullscreen
+  /// and back into: the flight rounds them from this to square at full
+  /// screen. Match it to the clip around your inline player (e.g. a card
+  /// with rounded corners). Defaults to square.
+  final BorderRadius fullscreenFlightBorderRadius;
 
   /// BuildContext getter for showing Dart fullscreen dialog
   /// Returns a mounted context from any registered platform view
@@ -1156,11 +1164,69 @@ class NativeVideoPlayerController {
     _textureViewIds.add(platformViewId);
   }
 
+  /// Engine texture ids of this controller's texture views, oldest first.
+  final Map<int, int> _textureIdsByView = <int, int>{};
+
+  /// The texture the player renders into now: the newest texture view's
+  /// (Android: a new texture backend takes the player's output over, and an
+  /// older one gets it back when the newer one goes). Null without one.
+  ValueListenable<int?> get activeTextureId => _activeTextureId;
+  final ValueNotifier<int?> _activeTextureId = ValueNotifier<int?>(null);
+
+  /// Called by the widget once a texture view's engine texture exists.
+  void registerTextureId(int platformViewId, int textureId) {
+    _textureIdsByView.remove(platformViewId);
+    _textureIdsByView[platformViewId] = textureId;
+    _activeTextureId.value = textureId;
+  }
+
   /// Internal: called by [NativeVideoPlayer] before [onPlatformViewCreated]
   /// for the view inside the Dart fullscreen route.
   void registerFullscreenView(int platformViewId) {
     _fullscreenViewIds.add(platformViewId);
   }
+
+  /// Latest still frame of this player (JPEG), captured by
+  /// [capturePosterFrame]. Painted where the platform view cannot be shown:
+  /// under a route sliding over it, and in the fullscreen flight. Null until
+  /// one is captured, and again after [load] switches the video.
+  Uint8List? get posterFrame => _posterFrame;
+  Uint8List? _posterFrame;
+
+  /// Bumped by [load], so a capture of the previous video that lands after
+  /// it is dropped.
+  int _posterGeneration = 0;
+
+  /// Captures the frame [platformViewId] shows now into [posterFrame], at
+  /// most [maxWidth] pixels wide. iOS only (elsewhere a no-op). Returns
+  /// [posterFrame], which stays the last good one when the capture fails.
+  Future<Uint8List?> capturePosterFrame(
+    int platformViewId, {
+    int? maxWidth,
+  }) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
+      return _posterFrame;
+    }
+    final int generation = _posterGeneration;
+    final Uint8List? frame = await VideoPlayerMethodChannel.captureFrame(
+      platformViewId,
+      maxWidth: maxWidth,
+    );
+    if (frame != null && generation == _posterGeneration) {
+      _posterFrame = frame;
+    }
+    return _posterFrame;
+  }
+
+  /// Where the video is in a Dart fullscreen flight (iOS). The fullscreen
+  /// route is see-through then (a swipe-down shows the page underneath) and
+  /// doesn't drive the inline page's route animations, so the inline view
+  /// follows this instead: hidden with an empty slot while the video is out,
+  /// the poster under the landing video on the way back.
+  ValueListenable<FullscreenFlightPhase> get fullscreenFlightPhase =>
+      _fullscreenFlightPhase;
+  final ValueNotifier<FullscreenFlightPhase> _fullscreenFlightPhase =
+      ValueNotifier<FullscreenFlightPhase>(FullscreenFlightPhase.none);
 
   /// Whether the primary view is a texture-rendered backend.
   bool get _primaryViewIsTexture =>
@@ -1246,6 +1312,24 @@ class NativeVideoPlayerController {
     if (style.embeddedTextScale != _embeddedTextScale) {
       _embeddedTextScale = style.embeddedTextScale;
       unawaited(_methodChannel?.setEmbeddedTextScale(style.embeddedTextScale));
+    }
+  }
+
+  /// Internal: the corner radius the Dart fullscreen host's swipe gives the
+  /// video, read by the fullscreen [NativeVideoPlayer] to clip the video.
+  ValueListenable<double>? get fullscreenVideoCornerRadius =>
+      _fullscreenVideoCornerRadius;
+  ValueListenable<double>? _fullscreenVideoCornerRadius;
+
+  /// Internal: set by the Dart fullscreen host.
+  void setFullscreenVideoCornerRadius(ValueListenable<double> radius) {
+    _fullscreenVideoCornerRadius = radius;
+  }
+
+  /// Internal: cleared by the Dart fullscreen host that set [radius].
+  void clearFullscreenVideoCornerRadius(ValueListenable<double> radius) {
+    if (identical(_fullscreenVideoCornerRadius, radius)) {
+      _fullscreenVideoCornerRadius = null;
     }
   }
 
@@ -1454,6 +1538,11 @@ class NativeVideoPlayerController {
     _platformViewIds.remove(platformViewId);
     _platformViewContexts.remove(platformViewId);
     _textureViewIds.remove(platformViewId);
+    if (_textureIdsByView.remove(platformViewId) != null) {
+      _activeTextureId.value = _textureIdsByView.isEmpty
+          ? null
+          : _textureIdsByView.values.last;
+    }
 
     // Cancel the event channel subscription first, then release the native
     // per-view channel handlers: on iOS the EventChannel handler strongly
@@ -1554,6 +1643,9 @@ class NativeVideoPlayerController {
     if (!force && _state.activityState.isLoaded) {
       return;
     }
+
+    _posterGeneration++;
+    _posterFrame = null;
 
     // Check if initialized - if method channel exists and platform view is created,
     // consider it initialized even if _isInitialized flag hasn't been set yet
@@ -2119,7 +2211,9 @@ class NativeVideoPlayerController {
         case AppLifecycleState.hidden:
         case AppLifecycleState.paused:
         case AppLifecycleState.detached:
-          debugPrint('PiP window dismissed while app is backgrounded — pausing');
+          debugPrint(
+            'PiP window dismissed while app is backgrounded — pausing',
+          );
           await pause();
           return;
         case AppLifecycleState.inactive:
@@ -2572,6 +2666,17 @@ class NativeVideoPlayerController {
       return;
     }
 
+    final FullscreenHeroFlight? heroFlight = await _fullscreenHeroFlight(
+      context,
+    );
+    if (!context.mounted) {
+      _updateState(_state.copyWith(isFullScreen: false));
+      return;
+    }
+
+    if (heroFlight != null) {
+      _fullscreenFlightPhase.value = FullscreenFlightPhase.out;
+    }
     await FullscreenManager.showFullscreenDialog(
       context: context,
       builder: (dialogContext) {
@@ -2580,10 +2685,17 @@ class NativeVideoPlayerController {
           overlayBuilder: _overlayBuilder,
           subtitleStyle:
               _subtitleStyle ?? const NativeVideoPlayerSubtitleStyle(),
+          heroFlight: heroFlight,
         );
       },
       lockToLandscape: lockToLandscape,
+      heroFlight: heroFlight,
       onExit: () {
+        // (With a flight, the phase is the flight's to end: the push future
+        // completes when the pop starts, not when the video has landed.)
+        if (heroFlight == null) {
+          _fullscreenFlightPhase.value = FullscreenFlightPhase.none;
+        }
         // Update state when fullscreen dialog is dismissed by user (back button, etc.)
         _dartFullscreenCloseCallback = null;
         if (_state.isFullScreen) {
@@ -2600,6 +2712,138 @@ class NativeVideoPlayerController {
           }
         }
       },
+    );
+  }
+
+  /// Lets Dart fullscreen grow out of the inline player [context] belongs
+  /// to. Null (fullscreen fades in) without a frame to fly (Android: the
+  /// flight hides the fullscreen view meanwhile, and hiding a hybrid
+  /// composition view leaves a stale image behind; or the capture failed)
+  /// or when the screen turns on the way in (a landscape lock from portrait
+  /// would leave the inline rect behind).
+  Future<FullscreenHeroFlight?> _fullscreenHeroFlight(
+    BuildContext context,
+  ) async {
+    int? viewId;
+    _platformViewContexts.forEach((id, ctx) {
+      if (identical(ctx, context)) viewId = id;
+    });
+    final Rect? startRect = _globalRectOf(context);
+    final Size screenSize = MediaQuery.sizeOf(context);
+    if (viewId == null ||
+        startRect == null ||
+        (lockToLandscape && screenSize.height > screenSize.width)) {
+      return null;
+    }
+    final int maxWidth =
+        (screenSize.longestSide * MediaQuery.devicePixelRatioOf(context))
+            .round();
+    // Android: only texture tiles fly (live, through the player's active
+    // texture); a hybrid-composition view can't be hidden under a flight
+    // without leaving a stale image behind.
+    final bool androidTexture =
+        defaultTargetPlatform == TargetPlatform.android &&
+        _textureViewIds.contains(viewId);
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      if (!androidTexture) return null;
+      return FullscreenHeroFlight(
+        poster: _posterFrame,
+        sharedTexture: _activeTextureId,
+        startRect: startRect,
+        inlineRect: () => context.mounted ? _globalRectOf(context) : null,
+        capturePoster: () async => null,
+        videoAspectRatio: _videoSize?.aspectRatio,
+        onReturn: () => unawaited(FullscreenManager.restoreSystemUi()),
+        onLanding: () => _landFlight(viewId!),
+        onDone: () => _fullscreenFlightPhase.value = FullscreenFlightPhase.none,
+        inlineBorderRadius: fullscreenFlightBorderRadius,
+      );
+    }
+
+    // The primary view: this one now, the fullscreen view on the way back.
+    Future<Uint8List?> capture() => capturePosterFrame(
+      _primaryPlatformViewId ?? viewId!,
+      maxWidth: maxWidth,
+    );
+
+    // Live video for the flight (iOS): the shared player as a plain engine
+    // texture, which flies like any Flutter content.
+    Future<int?> createLiveTexture() =>
+        defaultTargetPlatform == TargetPlatform.iOS
+        ? VideoPlayerMethodChannel.createFlightTexture(id)
+        : Future<int?>.value();
+    final Future<int?> liveTexture = createLiveTexture().timeout(
+      const Duration(milliseconds: 250),
+      onTimeout: () => null,
+    );
+
+    // Waits only briefly: a frame from the last pause beats a late start.
+    final Uint8List? poster = await capture().timeout(
+      const Duration(milliseconds: 250),
+      onTimeout: () => _posterFrame,
+    );
+    final int? liveTextureId = await liveTexture;
+    void disposeLiveTexture(int textureId) =>
+        unawaited(VideoPlayerMethodChannel.disposeFlightTexture(textureId));
+    if (poster == null || !context.mounted) {
+      if (liveTextureId != null) disposeLiveTexture(liveTextureId);
+      return null;
+    }
+    await precacheImage(MemoryImage(poster), context);
+    if (!context.mounted) {
+      if (liveTextureId != null) disposeLiveTexture(liveTextureId);
+      return null;
+    }
+    return FullscreenHeroFlight(
+      createLiveTexture: createLiveTexture,
+      disposeLiveTexture: disposeLiveTexture,
+      liveTextureId: liveTextureId,
+      poster: poster,
+      startRect: startRect,
+      inlineRect: () => context.mounted ? _globalRectOf(context) : null,
+      capturePoster: capture,
+      videoAspectRatio: await _aspectRatioOf(poster),
+      onReturn: () => unawaited(FullscreenManager.restoreSystemUi()),
+      onLanding: () => _landFlight(viewId!),
+      onDone: () => _fullscreenFlightPhase.value = FullscreenFlightPhase.none,
+      inlineBorderRadius: fullscreenFlightBorderRadius,
+    );
+  }
+
+  /// The way back has nearly landed (the flight covers the inline slot):
+  /// the slot shows the video again, and an Android texture tile gets the
+  /// player's output back now, so it has fresh frames by the time the
+  /// flight is gone (instead of a frame from before fullscreen). The flight
+  /// keeps showing the fullscreen texture until then, so it never goes
+  /// stale mid-air.
+  void _landFlight(int inlineViewId) {
+    _fullscreenFlightPhase.value = FullscreenFlightPhase.returning;
+    if (defaultTargetPlatform == TargetPlatform.android &&
+        _textureIdsByView.containsKey(inlineViewId)) {
+      unawaited(VideoPlayerMethodChannel.reattachSurface(inlineViewId));
+    }
+  }
+
+  /// The video's aspect ratio: reported by the player, else the frame's own.
+  Future<double?> _aspectRatioOf(Uint8List frame) async {
+    final double? reported = _videoSize?.aspectRatio;
+    if (reported != null && reported.isFinite && reported > 0) return reported;
+    try {
+      final image = await decodeImageFromList(frame);
+      final double aspectRatio = image.width / image.height;
+      image.dispose();
+      return aspectRatio;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Rect? _globalRectOf(BuildContext context) {
+    final RenderObject? box = context.findRenderObject();
+    if (box is! RenderBox || !box.attached || !box.hasSize) return null;
+    return MatrixUtils.transformRect(
+      box.getTransformTo(null),
+      Offset.zero & box.size,
     );
   }
 

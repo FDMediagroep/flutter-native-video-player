@@ -19,6 +19,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   animating, no longer counts as fully visible, so the window also closes in
   place instead of flying over that page. Automatic PiP restores through the
   same path now.
+- **Dart fullscreen grows out of the inline player.** With a custom
+  overlay, opening fullscreen no longer fades in: the video flies from the
+  inline player to fullscreen (and back on close, also from where a swipe
+  dismissed it) while the backdrop darkens, and keeps playing during the
+  flight. iOS flies a
+  short-lived engine texture of the shared player; Android flies the
+  player's own texture, so it needs `androidTextureMode` (the Dart
+  fullscreen host is then a texture too) and keeps the fade with platform
+  views. The way back follows the inline player as the page relayouts
+  (system bars return when it starts), and the inline slot stays empty
+  until the video lands. Falls back to the fade when no frame can be
+  captured or the screen rotates on the way in (`lockToLandscape` from
+  portrait). `NativeVideoPlayerController(fullscreenFlightBorderRadius:)`
+  sets the inline corners the flight rounds from and back to (default
+  square).
+- **Swipe down to close fullscreen, Instagram style.** Once a downward drag
+  starts, the video follows the finger (sideways too), shrinks, rounds its
+  corners the further it is pulled down, and the background fades; the
+  controls fade away. Letting go past 15% of the height, or flicking down,
+  closes fullscreen: with a flight (above) the video flies back into the
+  inline player from where it was let go, and the page underneath shows
+  through while dragging, its inline slot left empty. Otherwise it springs
+  back. The Dart fullscreen video is now sized to the
+  video's own aspect-fit rect, so only the video moves, not a screen-sized
+  black box.
+- `NativeVideoPlayerController.capturePosterFrame()` / `posterFrame` (iOS):
+  a JPEG of the frame the player shows, from the item's video output.
 
 ### Fixed
 - **iOS: a tile scrolled back while its PiP window is open plays the video
@@ -37,6 +64,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   window now only flies back into a player the widget reports as fully
   visible (no scroll view or clip cuts it). Otherwise it closes in place and
   the video plays on in the tile.
+- **iOS: the video draws over the next page during a route transition.**
+  A page pushed over a playing (or paused) video could slide in underneath
+  it: the native player view stayed on top of the incoming page until the
+  transition ended. Seen on devices (iOS 27), not in the simulator. While
+  another page route covers the player (animating over it or sitting on
+  top, including a page pushed on an outer navigator above a tab shell),
+  the platform view now leaves the scene and a still frame of the video is
+  painted in its place; the live view returns once the page is gone.
+  Dialogs and bottom sheets don't cover it. Texture tiles are unaffected.
+- **Android: a page's video pops in and out at full size during route
+  transitions.** A hybrid-composition view ignores its route's fade and
+  zoom, so it showed before its page had faded in and stayed until its page
+  was gone. The native view is now created once its page has finished
+  coming in and released as soon as a pop starts; black moves with the page
+  meanwhile. Hybrid composition still flickers for a frame when views come
+  and go; `androidTextureMode` (recommended for feeds) has none of this.
 
 ## [1.6.7] - 2026-10-15
 

@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'config/native_video_player_config.dart';
 import 'controllers/native_video_player_controller.dart';
 import 'enums/native_video_player_event.dart';
+import 'fullscreen/fullscreen_hero_transition.dart';
 import 'models/native_video_player_subtitle_style.dart';
 import 'models/native_video_player_video_size.dart';
 import 'platform/video_player_method_channel.dart';
@@ -79,8 +80,12 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
   @override
   void initState() {
     super.initState();
-    // Pass the overlay builder to the controller
-    widget.controller.setOverlayBuilder(widget.overlayBuilder);
+    // Pass the overlay builder to the controller (inline views only: the
+    // Dart fullscreen host builds its own from the controller's, and storing
+    // it would make the next fullscreen reuse this one's, which is gone).
+    if (!widget.isFullscreenContext) {
+      widget.controller.setOverlayBuilder(widget.overlayBuilder);
+    }
     // Cache the subtitle style on the controller so the Dart fullscreen host
     // (which builds its own NativeVideoPlayer) renders captions identically.
     widget.controller.setSubtitleStyle(widget.subtitleStyle);
@@ -96,9 +101,12 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
     final iosAutoPip =
         widget.controller.allowsPictureInPicture &&
         widget.controller.canStartPictureInPictureAutomatically;
+    // Android's Dart fullscreen host is a texture too when tiles are: then
+    // the fullscreen flight and swipe-down move plain Flutter content.
     _useTextureBackend =
         !kIsWeb &&
-        !widget.isFullscreenContext &&
+        (!widget.isFullscreenContext ||
+            defaultTargetPlatform == TargetPlatform.android) &&
         controlsHidden &&
         ((defaultTargetPlatform == TargetPlatform.android &&
                 NativeVideoPlayerConfig.global.androidTextureMode) ||
@@ -133,6 +141,8 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
 
     // Listen to controller events to restart hide timer on user interaction
     widget.controller.addControlListener(_handleControlEvent);
+    widget.controller.addActivityListener(_handleActivityEvent);
+    widget.controller.fullscreenFlightPhase.addListener(_handleFlightPhase);
 
     // Listen to overlay lock state changes
     _overlayLockSubscription = widget.controller.isOverlayLockedStream.listen((
@@ -154,6 +164,92 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
         }
       }
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Another page route over this one drives this route's
+    // secondaryAnimation: from its first frame until it is popped again.
+    // Nested navigators (a tab shell) put this route inside another route,
+    // and a page pushed on an outer navigator only drives the outer route's,
+    // so every enclosing route counts.
+    // A route's own animation runs while it is pushed or popped.
+    final List<Animation<double>> coverAnimations = <Animation<double>>[];
+    final List<Animation<double>> ownAnimations = <Animation<double>>[];
+    ModalRoute<dynamic>? route = ModalRoute.of(context);
+    while (route != null) {
+      final Animation<double>? secondary = route.secondaryAnimation;
+      if (secondary != null) coverAnimations.add(secondary);
+      final Animation<double>? own = route.animation;
+      if (own != null) ownAnimations.add(own);
+      final BuildContext? navigatorContext = route.navigator?.context;
+      route = navigatorContext == null || !navigatorContext.mounted
+          ? null
+          : ModalRoute.of(navigatorContext);
+    }
+    if (!listEquals(coverAnimations, _coverAnimations)) {
+      for (final Animation<double> animation in _coverAnimations) {
+        animation.removeStatusListener(_handleCoverStatus);
+      }
+      _coverAnimations = coverAnimations;
+      for (final Animation<double> animation in coverAnimations) {
+        animation.addStatusListener(_handleCoverStatus);
+      }
+      _covered = _anyRouteCovered;
+    }
+    if (!listEquals(ownAnimations, _ownAnimations)) {
+      for (final Animation<double> animation in _ownAnimations) {
+        animation.removeStatusListener(_handleOwnRouteStatus);
+      }
+      _ownAnimations = ownAnimations;
+      for (final Animation<double> animation in ownAnimations) {
+        animation.addStatusListener(_handleOwnRouteStatus);
+      }
+      _routeInMotion = _anyOwnRouteInMotion;
+    }
+  }
+
+  /// Android hybrid composition draws a platform view at full opacity and
+  /// size whatever its route's transition does, so a page's video popped in
+  /// before its page had faded in, and stayed until its page was gone. While
+  /// this view's page is pushed or popped there is no native view then, just
+  /// black that moves with the page: it is created once the push is done,
+  /// and released as soon as a pop starts (the page below gets the shared
+  /// player back sooner, too). Hiding a live view instead leaves a stale
+  /// image of its page in the compositor, so the view is released, not
+  /// hidden.
+  bool get _defersOnAndroid =>
+      !kIsWeb &&
+      defaultTargetPlatform == TargetPlatform.android &&
+      !_useTextureBackend;
+
+  List<Animation<double>> _ownAnimations = <Animation<double>>[];
+  bool _routeInMotion = false;
+
+  bool get _anyOwnRouteInMotion => _ownAnimations.any(
+    (Animation<double> animation) =>
+        animation.status == AnimationStatus.forward ||
+        animation.status == AnimationStatus.reverse,
+  );
+
+  void _handleOwnRouteStatus(AnimationStatus status) {
+    if (!_defersOnAndroid) return;
+    final bool moving = _anyOwnRouteInMotion;
+    if (moving == _routeInMotion || !mounted) return;
+    if (moving) _releasePlatformView();
+    setState(() => _routeInMotion = moving);
+  }
+
+  /// Drops the native view (it is rebuilt by [_platformView] when needed).
+  void _releasePlatformView() {
+    final int? viewId = _platformViewId;
+    if (viewId != null) {
+      widget.controller.onPlatformViewDisposed(viewId);
+      _platformViewId = null;
+    }
+    _cachedPlatformView = null;
+    _reportedViewportSize = null;
   }
 
   @override
@@ -203,6 +299,132 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
     if (_overlayVisible && event.state != PlayerControlState.timeUpdated) {
       _startHideTimer();
     }
+  }
+
+  /// iOS platform views are native views the engine layers around Flutter
+  /// content, and while another route slides over this one the video can end
+  /// up drawn on top of that route. So while this route is covered (another
+  /// page route animating over it or sitting on top), the platform view is
+  /// left out of the scene and the player's poster frame is painted in its
+  /// place. Texture tiles are plain Flutter content and need none of this.
+  /// Android's hybrid composition layers its views correctly, and leaving a
+  /// view out of the scene there leaves a stale image of its page behind,
+  /// which shows whenever a video surface is briefly empty.
+  bool get _hidesWhenCovered =>
+      !kIsWeb &&
+      defaultTargetPlatform == TargetPlatform.iOS &&
+      !_useTextureBackend;
+
+  List<Animation<double>> _coverAnimations = <Animation<double>>[];
+  bool _covered = false;
+
+  bool get _anyRouteCovered => _coverAnimations.any(
+    (Animation<double> animation) => !animation.isDismissed,
+  );
+
+  void _handleCoverStatus(AnimationStatus status) {
+    if (!_hidesWhenCovered) return;
+    // A route starts sliding over this one, or off it again: the frame
+    // showing now (the video kept playing while it was covered).
+    if (status == AnimationStatus.forward ||
+        status == AnimationStatus.reverse) {
+      unawaited(_capturePosterFrame());
+    }
+    final covered = _anyRouteCovered;
+    if (covered != _covered && mounted) {
+      setState(() => _covered = covered);
+    }
+  }
+
+  void _handleFlightPhase() {
+    if (!widget.isFullscreenContext && mounted) setState(() {});
+  }
+
+  /// The video is out in a fullscreen flight: the inline slot stays empty
+  /// (texture tiles always; platform views see [_coverablePlatformView]).
+  bool get _videoOut =>
+      !widget.isFullscreenContext &&
+      widget.controller.fullscreenFlightPhase.value ==
+          FullscreenFlightPhase.out;
+
+  void _handleActivityEvent(PlayerActivityEvent event) {
+    if (!_hidesWhenCovered) return;
+    // Keeps a poster ready for a paused video, so a route pushed over it
+    // shows the exact frame from its first transition frame on.
+    final bool stopped =
+        event.state == PlayerActivityState.paused ||
+        event.state == PlayerActivityState.completed;
+    // The first capture of a video attaches the native frame output and
+    // waits for a frame (up to a second); doing it once playback starts makes
+    // the capture when a route covers the player immediate, and leaves a
+    // frame to show until that one lands instead of black.
+    final bool firstPlay =
+        event.state == PlayerActivityState.playing &&
+        widget.controller.posterFrame == null;
+    if (stopped || firstPlay) {
+      unawaited(_capturePosterFrame());
+    }
+  }
+
+  Future<void> _capturePosterFrame() async {
+    final int? viewId = _platformViewId;
+    if (viewId == null) return;
+    final double? width = _lastConstraints?.maxWidth;
+    final Uint8List? frame = await widget.controller.capturePosterFrame(
+      viewId,
+      maxWidth: width != null && width.isFinite
+          ? (width * _devicePixelRatio).round()
+          : null,
+    );
+    if (frame == null || !mounted) return;
+    // Decoded before it is shown, so swapping it in never flashes black.
+    await precacheImage(MemoryImage(frame), context);
+    if (mounted) setState(() {});
+  }
+
+  /// The platform view, or the poster frame while a transition would draw
+  /// it wrong (see [_hidesWhenCovered]). The platform view stays mounted
+  /// (hidden) so the native view survives.
+  Widget _coverablePlatformView() {
+    if (_defersOnAndroid && _routeInMotion) {
+      return const ColoredBox(color: Color(0xFF000000));
+    }
+    if (!_hidesWhenCovered) return _platformView();
+    final FullscreenFlightPhase flight = widget.isFullscreenContext
+        ? FullscreenFlightPhase.none
+        : widget.controller.fullscreenFlightPhase.value;
+    final bool hidden = _covered || flight != FullscreenFlightPhase.none;
+    final Uint8List? poster = widget.controller.posterFrame;
+    // While the video is out in a fullscreen flight, its inline slot stays
+    // empty (a swipe-down shows the page with a gap for it), until the way
+    // back starts: the poster is under the landing video then, so the live
+    // view's first frame never shows a gap.
+    final bool slotEmpty = flight == FullscreenFlightPhase.out;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Visibility(
+          visible: !hidden,
+          maintainState: true,
+          maintainAnimation: true,
+          maintainSize: true,
+          child: _platformView(),
+        ),
+        if (slotEmpty)
+          const SizedBox.expand()
+        else if (hidden)
+          ColoredBox(
+            color: const Color(0xFF000000),
+            child: poster == null
+                ? null
+                : Image.memory(
+                    poster,
+                    fit: BoxFit.contain,
+                    gaplessPlayback: true,
+                  ),
+          ),
+      ],
+    );
   }
 
   void _startHideTimer() {
@@ -255,6 +477,14 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
     }
 
     widget.controller.removeControlListener(_handleControlEvent);
+    widget.controller.removeActivityListener(_handleActivityEvent);
+    widget.controller.fullscreenFlightPhase.removeListener(_handleFlightPhase);
+    for (final Animation<double> animation in _coverAnimations) {
+      animation.removeStatusListener(_handleCoverStatus);
+    }
+    for (final Animation<double> animation in _ownAnimations) {
+      animation.removeStatusListener(_handleOwnRouteStatus);
+    }
     _overlayLockSubscription?.cancel();
     _swapRequestSubscription?.cancel();
     _pendingSwapCompleter?.complete(false);
@@ -452,6 +682,10 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
         _textureId = textureId;
       });
       widget.controller.registerTextureView(viewId);
+      widget.controller.registerTextureId(viewId, textureId);
+      if (widget.isFullscreenContext) {
+        widget.controller.registerFullscreenView(viewId);
+      }
       await widget.controller.onPlatformViewCreated(viewId, context);
       _maybeReportViewportSize();
     } catch (e) {
@@ -463,6 +697,7 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
   /// whatever box the app gives the player — mirroring the platform views'
   /// RESIZE_MODE_FIT/resizeAspect behavior. Black until the size is known.
   Widget _textureWidget() {
+    if (_videoOut) return const SizedBox.expand();
     final textureId = _textureId;
     if (textureId == null) {
       return const ColoredBox(color: Color(0xFF000000));
@@ -500,6 +735,15 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
   Widget _buildPlatformView() {
     const String viewType = 'native_video_player';
     final Map<String, dynamic> creationParams = _getCreationParams();
+    // The fullscreen host with custom controls has no native controls to
+    // touch, and claiming every touch on the video would beat the
+    // swipe-down-to-close drag; inline views keep claiming them.
+    final Set<Factory<OneSequenceGestureRecognizer>> gestureRecognizers =
+        widget.isFullscreenContext && widget.overlayBuilder != null
+        ? const <Factory<OneSequenceGestureRecognizer>>{}
+        : const <Factory<OneSequenceGestureRecognizer>>{
+            Factory<OneSequenceGestureRecognizer>(EagerGestureRecognizer.new),
+          };
 
     if (defaultTargetPlatform == TargetPlatform.iOS) {
       return UiKitView(
@@ -507,9 +751,7 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
         onPlatformViewCreated: _onPlatformViewCreated,
         creationParams: creationParams,
         creationParamsCodec: const StandardMessageCodec(),
-        gestureRecognizers: const <Factory<OneSequenceGestureRecognizer>>{
-          Factory<OneSequenceGestureRecognizer>(EagerGestureRecognizer.new),
-        },
+        gestureRecognizers: gestureRecognizers,
       );
     }
 
@@ -521,9 +763,7 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
         surfaceFactory: (context, controller) {
           return AndroidViewSurface(
             controller: controller as AndroidViewController,
-            gestureRecognizers: const <Factory<OneSequenceGestureRecognizer>>{
-              Factory<OneSequenceGestureRecognizer>(EagerGestureRecognizer.new),
-            },
+            gestureRecognizers: gestureRecognizers,
             hitTestBehavior: PlatformViewHitTestBehavior.opaque,
           );
         },
@@ -554,20 +794,69 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
     );
   }
 
+  /// The video clipped with the fullscreen swipe's corner radius (always the
+  /// same widgets, so the native view is never rebuilt).
+  Widget _rounded(Widget surface) {
+    final ValueListenable<double> radius =
+        widget.controller.fullscreenVideoCornerRadius ??
+        const AlwaysStoppedAnimation<double>(0);
+    return ValueListenableBuilder<double>(
+      valueListenable: radius,
+      child: surface,
+      builder: (BuildContext context, double value, Widget? child) =>
+          ClipRRect(borderRadius: BorderRadius.circular(value), child: child),
+    );
+  }
+
+  /// The fullscreen host's video surface sized to the video's aspect-fit
+  /// rect instead of the whole screen, so a swipe-down moves just the video
+  /// (not a screen-sized black box around it). Always the same widgets,
+  /// starting from the box's own aspect until the size is known, so the
+  /// native view is never rebuilt.
+  Widget _fittedToVideo(Widget surface) {
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final double boxAspect =
+            constraints.hasBoundedWidth &&
+                constraints.hasBoundedHeight &&
+                constraints.maxHeight > 0
+            ? constraints.maxWidth / constraints.maxHeight
+            : 16 / 9;
+        return StreamBuilder<NativeVideoPlayerVideoSize>(
+          stream: widget.controller.videoSizeStream,
+          initialData: widget.controller.videoSize,
+          builder: (context, snapshot) {
+            final NativeVideoPlayerVideoSize? size = snapshot.data;
+            final double aspect =
+                size != null && size.width > 0 && size.height > 0
+                ? size.aspectRatio
+                : boxAspect;
+            return Center(
+              child: AspectRatio(aspectRatio: aspect, child: _rounded(surface)),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // Track the view's on-screen size for viewport-based quality capping
     // (rotation/resize re-runs this builder; the report deduplicates).
-    final platformView = LayoutBuilder(
+    final Widget videoSurface = LayoutBuilder(
       builder: (context, constraints) {
         _lastConstraints = constraints;
         _devicePixelRatio = MediaQuery.maybeDevicePixelRatioOf(context) ?? 1.0;
         _maybeReportViewportSize();
         // Texture backends render as plain Flutter content (rebuilding the
         // Texture widget is free, so no caching needed).
-        return _useTextureBackend ? _textureWidget() : _platformView();
+        return _useTextureBackend ? _textureWidget() : _coverablePlatformView();
       },
     );
+    final Widget platformView = widget.isFullscreenContext
+        ? _fittedToVideo(videoSurface)
+        : videoSurface;
 
     // Captions grow when the player is fullscreen AND in landscape; inline and
     // fullscreen-portrait keep the base typography. Reading orientation here
@@ -594,11 +883,24 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
     // above the video and below the controls. Suppressed during PiP (the
     // Flutter UI is not part of the iOS PiP window; on Android the native
     // sideloaded track takes over so captions stay visible there).
+    // The video is out in a fullscreen flight: its captions and controls
+    // leave the (empty) inline slot with it.
+    final bool videoOut = _videoOut;
+    Widget whileVideoIn(Widget layer) => Visibility(
+      visible: !videoOut,
+      maintainState: true,
+      maintainAnimation: true,
+      maintainSize: true,
+      child: layer,
+    );
+
     final subtitleLayer = StreamBuilder<bool>(
       stream: widget.controller.isPipEnabledStream,
       initialData: widget.controller.isPipEnabled,
       builder: (context, pipSnapshot) {
-        if (pipSnapshot.data ?? false) return const SizedBox.shrink();
+        if ((pipSnapshot.data ?? false) || videoOut) {
+          return const SizedBox.shrink();
+        }
         // Track the video's display size so the overlay can pin captions to
         // the video's content rect instead of the full (possibly
         // letterboxed) widget — e.g. portrait fullscreen with a 16:9 video.
@@ -636,7 +938,7 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
           // Subtitles render below the controls overlay
           subtitleLayer,
           // Transparent tap layer when overlay is hidden
-          if (!_overlayVisible)
+          if (!_overlayVisible && !videoOut)
             Positioned.fill(
               child: GestureDetector(
                 onTap: _toggleOverlay,
@@ -648,15 +950,17 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
           // boundary so fade animations only repaint the overlay layer (a
           // boundary around the platform view itself would be useless — it
           // composites outside Flutter's raster cache)
-          RepaintBoundary(
-            child: FadeTransition(
-              opacity: _overlayOpacity,
-              child: GestureDetector(
-                onTap: _overlayVisible ? _toggleOverlay : null,
-                behavior: HitTestBehavior.deferToChild,
-                child: IgnorePointer(
-                  ignoring: !_overlayVisible,
-                  child: widget.overlayBuilder!(context, widget.controller),
+          whileVideoIn(
+            RepaintBoundary(
+              child: FadeTransition(
+                opacity: _overlayOpacity,
+                child: GestureDetector(
+                  onTap: _overlayVisible ? _toggleOverlay : null,
+                  behavior: HitTestBehavior.deferToChild,
+                  child: IgnorePointer(
+                    ignoring: !_overlayVisible,
+                    child: widget.overlayBuilder!(context, widget.controller),
+                  ),
                 ),
               ),
             ),

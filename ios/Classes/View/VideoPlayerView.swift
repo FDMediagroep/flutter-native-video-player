@@ -898,6 +898,8 @@ import QuartzCore
             handleSetShowNativeControls(call: call, result: result)
         case "setViewportSize":
             handleSetViewportSize(call: call, result: result)
+        case "captureFrame":
+            handleCaptureFrame(call: call, result: result)
         case "ensureSurfaceConnected":
             // No-op on iOS; each platform view uses its own AVPlayerViewController when shared.
             result(nil)

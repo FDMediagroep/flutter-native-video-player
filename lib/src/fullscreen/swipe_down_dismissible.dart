@@ -1,32 +1,69 @@
 import 'dart:math';
 import 'dart:ui' show lerpDouble;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
-/// A minimal swipe-down-to-dismiss wrapper for fullscreen pages.
+/// Swipe-down-to-dismiss for fullscreen pages, Instagram style: once a
+/// downward drag starts, the content follows the finger (sideways too),
+/// shrinking and rounding its corners as it goes down while the background
+/// fades. Letting go past a threshold, or flicking down, dismisses the page;
+/// otherwise the content springs back into place.
 ///
-/// Replaces the `dismissible_page` package dependency with the single
-/// behavior this plugin actually used: drag the page down, the content
-/// follows the finger while scaling down slightly and rounding its corners,
-/// the background fades out, and releasing past a threshold dismisses the
-/// page. Releasing before the threshold animates the content back into
-/// place.
+/// The drag still starts as a vertical drag, so horizontal gestures inside
+/// (a seek bar) keep working.
 class SwipeDownDismissible extends StatefulWidget {
   const SwipeDownDismissible({
     required this.child,
     required this.onDismissed,
     this.backgroundColor = Colors.black,
+    this.onDismissing,
+    this.onDragStart,
+    this.onDragCancel,
+    this.dragProgress,
+    this.roundContent = true,
+    this.contentCornerRadius,
     super.key,
   });
 
   /// The page content.
   final Widget child;
 
-  /// Called when the user drags down past the dismiss threshold and lets go.
+  /// Called when the user drags down past the dismiss threshold (or flicks
+  /// down) and lets go.
   final VoidCallback onDismissed;
 
   /// Background color behind the content; fades out as the drag progresses.
   final Color backgroundColor;
+
+  /// Called right before [onDismissed] with where the content is on screen
+  /// then (dragged and scaled), the background's opacity and the content's
+  /// corner radius, so a closing transition can start from there.
+  final void Function(
+    Rect contentRect,
+    double backgroundOpacity,
+    double cornerRadius,
+  )?
+  onDismissing;
+
+  /// Called when a dismiss drag starts (to prepare a closing transition).
+  final VoidCallback? onDragStart;
+
+  /// Called when a drag ends without dismissing.
+  final VoidCallback? onDragCancel;
+
+  /// Receives the drag's progress (0 at rest, 1 at the dismiss distance and
+  /// beyond), e.g. to fade controls out while dragging.
+  final ValueNotifier<double>? dragProgress;
+
+  /// Whether the content's corners round as it is dragged down. Off when
+  /// the page rounds something inside it instead (a video smaller than the
+  /// page), using [contentCornerRadius].
+  final bool roundContent;
+
+  /// Receives the corner radius the drag gives the content (growing with
+  /// how far it is dragged down), before the content's scale.
+  final ValueNotifier<double>? contentCornerRadius;
 
   @override
   State<SwipeDownDismissible> createState() => _SwipeDownDismissibleState();
@@ -34,102 +71,184 @@ class SwipeDownDismissible extends StatefulWidget {
 
 class _SwipeDownDismissibleState extends State<SwipeDownDismissible>
     with SingleTickerProviderStateMixin {
-  // Tuned to match the defaults of dismissible_page 1.0.2, which this
-  // widget replaced, so the swipe feel stays identical.
+  /// Dismisses when let go past this fraction of the page height...
   static const double _dismissThreshold = 0.15;
-  static const double _dragSensitivity = 0.7;
-  static const double _maxTranslation = 0.4;
-  static const double _minScale = 0.85;
-  static const double _minRadius = 7;
-  static const double _maxRadius = 30;
-  static const Duration _reverseDuration = Duration(milliseconds: 200);
 
-  /// Tracks the drag as a fraction of the page height (0.0 - 1.0).
-  late final AnimationController _dragController;
-  double _dragExtent = 0;
+  /// ...or when flicked down this fast (logical px/s), once it moved at
+  /// least [_flingMinDistance] of the height.
+  static const double _flingVelocity = 900;
+  static const double _flingMinDistance = 0.08;
 
-  @override
-  void initState() {
-    super.initState();
-    _dragController = AnimationController(vsync: this, duration: Duration.zero);
-  }
+  /// Scale at (and past) half the page height.
+  static const double _minScale = 0.55;
+  static const double _maxRadius = 28;
+
+  /// Sideways movement follows the finger in full once the content moved
+  /// this far down (so a mostly vertical start stays put sideways).
+  static const double _sidewaysRamp = 80;
+
+  /// Where the content is, relative to its resting place.
+  Offset _offset = Offset.zero;
+
+  /// The finger position the offset is measured from while dragging.
+  Offset? _origin;
+  bool _dragging = false;
+
+  late final AnimationController _settle = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 260),
+  )..addListener(_handleSettleTick);
+  Offset _settleFrom = Offset.zero;
+
+  final GlobalKey _contentKey = GlobalKey();
 
   @override
   void dispose() {
-    _dragController.dispose();
+    _settle.dispose();
     super.dispose();
   }
 
+  /// The page height, from the last layout.
+  double _height = 1;
+
+  /// 0 at rest, 1 at the dismiss distance and beyond.
+  double get _progress =>
+      (_offset.dy / (_height * _dismissThreshold)).clamp(0.0, 1.0);
+
+  /// How far down the content is, as a fraction of the page height.
+  double get _downFraction => (_offset.dy / _height).clamp(0.0, 1.0);
+
+  void _setOffset(Offset offset) {
+    setState(() => _offset = offset);
+    widget.dragProgress?.value = _progress;
+    widget.contentCornerRadius?.value = _cornerRadius;
+  }
+
+  void _handleSettleTick() {
+    _setOffset(
+      Offset.lerp(
+        _settleFrom,
+        Offset.zero,
+        Curves.easeOutCubic.transform(_settle.value),
+      )!,
+    );
+  }
+
   void _handleDragStart(DragStartDetails details) {
-    if (_dragController.isAnimating) {
-      _dragExtent = _dragController.value * context.size!.height;
-      _dragController.stop();
-    } else {
-      _dragExtent = 0;
-      _dragController.value = 0;
-    }
+    // Grabbing the content while it springs back continues from there.
+    _settle.stop();
+    _origin = details.globalPosition - _offset;
+    _dragging = true;
+    widget.onDragStart?.call();
   }
 
-  void _handleDragUpdate(DragUpdateDetails details) {
-    if (_dragController.isAnimating) return;
-    final delta = details.primaryDelta ?? 0;
-
-    // Down-only: never let the content travel above its resting position.
-    if (_dragExtent + delta > 0) {
-      _dragExtent += delta;
-    } else {
-      _dragExtent = 0;
-    }
-
-    _dragController.value = _dragExtent / context.size!.height;
+  void _handlePointerMove(PointerMoveEvent event) {
+    final Offset? origin = _origin;
+    if (!_dragging || origin == null) return;
+    final Offset raw = event.position - origin;
+    // Down only; sideways follows once the content is on its way down.
+    final double dy = max(0, raw.dy);
+    final double sideways = (dy / _sidewaysRamp).clamp(0.0, 1.0);
+    _setOffset(Offset(raw.dx * sideways, dy));
   }
 
-  void _handleDragEnd(DragEndDetails details) {
-    if (_dragController.isAnimating || _dragController.isDismissed) return;
-    if (_dragController.value > _dismissThreshold) {
+  void _handleDragEnd(DragEndDetails details) =>
+      _release(details.velocity.pixelsPerSecond.dy);
+
+  /// Let go (or the system cancelled the touch, which counts as a release
+  /// without speed): dismisses or springs back, never stays put.
+  void _release(double velocity) {
+    if (!_dragging) return;
+    _dragging = false;
+    _origin = null;
+    final bool flung =
+        velocity > _flingVelocity && _downFraction > _flingMinDistance;
+    if (_downFraction > _dismissThreshold || flung) {
+      _reportDismissing();
       widget.onDismissed();
-    } else {
-      _dragController.animateBack(
-        0,
-        duration: _reverseDuration,
-        curve: Curves.easeOut,
-      );
+      return;
     }
+    widget.onDragCancel?.call();
+    if (_offset == Offset.zero) return;
+    _settleFrom = _offset;
+    _settle.forward(from: 0);
   }
+
+  void _reportDismissing() {
+    final onDismissing = widget.onDismissing;
+    final box = _contentKey.currentContext?.findRenderObject();
+    if (onDismissing == null || box is! RenderBox || !box.hasSize) return;
+    onDismissing(
+      MatrixUtils.transformRect(
+        box.getTransformTo(null),
+        Offset.zero & box.size,
+      ),
+      _backgroundOpacity,
+      _cornerRadius * _scale,
+    );
+  }
+
+  /// Fades out over the first part of the way down, so the page underneath
+  /// shows while dragging.
+  double get _backgroundOpacity => (1 - _downFraction * 3).clamp(0.0, 1.0);
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onVerticalDragStart: _handleDragStart,
-      onVerticalDragUpdate: _handleDragUpdate,
-      onVerticalDragEnd: _handleDragEnd,
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedBuilder(
-        animation: _dragController,
-        builder: (BuildContext context, Widget? child) {
-          final dragValue = _dragController.value * _dragSensitivity;
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        if (constraints.hasBoundedHeight && constraints.maxHeight > 0) {
+          _height = constraints.maxHeight;
+        }
+        return _buildContent();
+      },
+    );
+  }
 
-          return ColoredBox(
-            color: widget.backgroundColor == Colors.transparent
-                ? Colors.transparent
-                : widget.backgroundColor.withValues(
-                    alpha: (1 - dragValue).clamp(0.0, 1.0),
-                  ),
-            child: FractionalTranslation(
-              translation: Offset(0, min(dragValue, _maxTranslation)),
-              child: Transform.scale(
-                scale: lerpDouble(1, _minScale, dragValue),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(
-                    lerpDouble(_minRadius, _maxRadius, dragValue)!,
-                  ),
-                  child: child,
+  /// The content's scale: shrinking over the first half of the height.
+  double get _scale => lerpDouble(
+    1,
+    _minScale,
+    Curves.easeOut.transform((_downFraction * 2).clamp(0.0, 1.0)),
+  )!;
+
+  /// The content's corner radius before scaling.
+  double get _cornerRadius =>
+      lerpDouble(0, _maxRadius, (_downFraction * 4).clamp(0, 1))!;
+
+  Widget _buildContent() {
+    final Color background = widget.backgroundColor == Colors.transparent
+        ? Colors.transparent
+        : widget.backgroundColor.withValues(
+            alpha: widget.backgroundColor.a * _backgroundOpacity,
+          );
+
+    return Listener(
+      onPointerMove: _handlePointerMove,
+      child: GestureDetector(
+        onVerticalDragStart: _handleDragStart,
+        onVerticalDragEnd: _handleDragEnd,
+        onVerticalDragCancel: () => _release(0),
+        // Required for the recognizer to compete; positions come from the
+        // Listener so sideways movement counts too.
+        onVerticalDragUpdate: (_) {},
+        dragStartBehavior: DragStartBehavior.start,
+        behavior: HitTestBehavior.opaque,
+        child: ColoredBox(
+          color: background,
+          child: Transform.translate(
+            offset: _offset,
+            child: Transform.scale(
+              scale: _scale,
+              child: ClipRRect(
+                key: _contentKey,
+                borderRadius: BorderRadius.circular(
+                  widget.roundContent ? _cornerRadius : 0,
                 ),
+                child: widget.child,
               ),
             ),
-          );
-        },
-        child: widget.child,
+          ),
+        ),
       ),
     );
   }

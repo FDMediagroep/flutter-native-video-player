@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../platform/platform_utils.dart';
+import 'fullscreen_hero_transition.dart';
 
 /// Manages fullscreen state, system UI visibility, and device orientation
 class FullscreenManager {
@@ -82,6 +83,13 @@ class FullscreenManager {
     }
   }
 
+  /// Brings the system bars back right away (fullscreen still closing), so
+  /// the page below is already laid out with them while the video lands.
+  static Future<void> restoreSystemUi() => SystemChrome.setEnabledSystemUIMode(
+    SystemUiMode.edgeToEdge,
+    overlays: SystemUiOverlay.values,
+  );
+
   /// Set orientation preferences that will be tracked by FullscreenManager
   ///
   /// Call this instead of `SystemChrome.setPreferredOrientations()` if you want
@@ -126,6 +134,8 @@ class FullscreenManager {
   /// - builder: Widget builder for the fullscreen content
   /// - lockToLandscape: If true, locks orientation to landscape
   /// - onExit: Optional callback when fullscreen is exited
+  /// - heroFlight: When given, the video grows out of the inline player
+  ///   instead of fading in (see [FullscreenHeroTransition])
   ///
   /// **Returns:**
   /// The result from the dialog when it's dismissed
@@ -134,6 +144,7 @@ class FullscreenManager {
     required Widget Function(BuildContext) builder,
     bool lockToLandscape = true,
     VoidCallback? onExit,
+    FullscreenHeroFlight? heroFlight,
   }) async {
     // Enter fullscreen mode
     await enterFullscreen(lockToLandscape: lockToLandscape);
@@ -146,10 +157,25 @@ class FullscreenManager {
     // rootNavigator: true ensures we use the topmost Navigator in the widget tree
     final result = await Navigator.of(context, rootNavigator: true).push<T>(
       PageRouteBuilder<T>(
-        opaque: true,
-        barrierColor: Colors.black,
+        // With a flight the page underneath stays painted, so a swipe-down
+        // reveals it as the backdrop fades (the inline player's slot is
+        // left empty while the video is out).
+        opaque: heroFlight == null,
+        // The flight paints its own backdrop (it must also follow a swipe
+        // dismissal's faded one on the way back).
+        barrierColor: heroFlight == null ? Colors.black : null,
+        transitionDuration: heroFlight == null
+            ? const Duration(milliseconds: 300)
+            : const Duration(milliseconds: 350),
         pageBuilder: (context, _, _) => builder(context),
         transitionsBuilder: (context, animation, _, child) {
+          if (heroFlight != null) {
+            return FullscreenHeroTransition(
+              animation: animation,
+              flight: heroFlight,
+              child: child,
+            );
+          }
           return FadeTransition(opacity: animation, child: child);
         },
       ),

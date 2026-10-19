@@ -65,6 +65,66 @@ class VideoPlayerMethodChannel {
     }
   }
 
+  /// JPEG of the frame [platformViewId]'s player shows now, upright and at
+  /// most [maxWidth] pixels wide. Null when there is no frame yet or the
+  /// platform has no capture (iOS only). Static because it can
+  /// target any view, not just the primary one.
+  static Future<Uint8List?> captureFrame(
+    int platformViewId, {
+    int? maxWidth,
+  }) async {
+    try {
+      return await const MethodChannel(
+        'native_video_player',
+      ).invokeMethod<Uint8List>('captureFrame', <String, Object>{
+        'viewId': platformViewId,
+        'maxWidth': ?maxWidth,
+      });
+    } catch (e) {
+      debugPrint('Frame capture failed for view $platformViewId: $e');
+      return null;
+    }
+  }
+
+  /// A live engine texture of [controllerId]'s player for the fullscreen
+  /// flight (iOS). Null when unsupported or the player is gone. Release it
+  /// with [disposeFlightTexture].
+  static Future<int?> createFlightTexture(int controllerId) async {
+    try {
+      return await const MethodChannel('native_video_player').invokeMethod<int>(
+        'createFlightTexture',
+        <String, Object>{'controllerId': controllerId},
+      );
+    } catch (e) {
+      debugPrint('Flight texture unavailable for controller $controllerId: $e');
+      return null;
+    }
+  }
+
+  static Future<void> disposeFlightTexture(int textureId) async {
+    try {
+      await const MethodChannel('native_video_player').invokeMethod<void>(
+        'disposeFlightTexture',
+        <String, Object>{'textureId': textureId},
+      );
+    } catch (e) {
+      debugPrint('Failed to dispose flight texture $textureId: $e');
+    }
+  }
+
+  /// Gives [platformViewId] the player's video output back (Android texture
+  /// views; a newer view of the same player took it over).
+  static Future<void> reattachSurface(int platformViewId) async {
+    try {
+      await const MethodChannel('native_video_player').invokeMethod<void>(
+        'ensureSurfaceConnected',
+        <String, Object>{'viewId': platformViewId},
+      );
+    } catch (e) {
+      debugPrint('Failed to reattach surface for view $platformViewId: $e');
+    }
+  }
+
   /// Loads a video URL
   Future<void> load({
     required String url,

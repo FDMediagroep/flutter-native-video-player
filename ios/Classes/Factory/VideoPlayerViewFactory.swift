@@ -25,12 +25,22 @@ import UIKit
     private static var textureRegistry: FlutterTextureRegistry?
     private static var textureViews: [Int64: VideoPlayerView] = [:]
 
+    // Live textures of a controller's player for the Dart fullscreen flight
+    // (keyed by textureId). Bare renderers, not views: nothing registers
+    // with SharedPlayerManager, so primary view, auto PiP and Now Playing
+    // stay with the real views. Each lives for one flight.
+    private static var flightRenderers: [Int64: TexturePlayerRenderer] = [:]
+
     private static func disposeAllTextureBackedViews() {
         for (viewId, view) in textureViews {
             view.tearDownChannels()
             npLog("🧹 Disposed texture-backed view \(viewId) (hot restart/teardown)")
         }
         textureViews.removeAll()
+        for renderer in flightRenderers.values {
+            renderer.shutdown()
+        }
+        flightRenderers.removeAll()
     }
 
     public static func register(with registrar: FlutterPluginRegistrar) {
@@ -152,6 +162,34 @@ import UIKit
                 registerView(view, withId: viewId)
                 textureViews[viewId] = view
                 result(["textureId": renderer.textureId])
+                return
+            }
+
+            if call.method == "createFlightTexture" {
+                guard let registry = textureRegistry,
+                      let args = call.arguments as? [String: Any],
+                      let controllerId = args["controllerId"] as? Int,
+                      let player = SharedPlayerManager.shared.existingPlayer(for: controllerId) else {
+                    result(nil)
+                    return
+                }
+                let renderer = TexturePlayerRenderer(player: player, registry: registry)
+                renderer.register(with: registry)
+                // Pumps frames for the flight even if the player is paused
+                // (a paused video then just repeats its frame).
+                renderer.setRunning(true)
+                flightRenderers[renderer.textureId] = renderer
+                result(renderer.textureId)
+                return
+            }
+
+            if call.method == "disposeFlightTexture" {
+                if let args = call.arguments as? [String: Any],
+                   let textureId = (args["textureId"] as? NSNumber)?.int64Value,
+                   let renderer = flightRenderers.removeValue(forKey: textureId) {
+                    renderer.shutdown()
+                }
+                result(nil)
                 return
             }
 
