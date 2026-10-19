@@ -301,6 +301,42 @@ Outro
       expect(events, ['start', 'end 30']);
     });
 
+    testWidgets('preview, chapter and snap callbacks', (tester) async {
+      final previews = <NativeVideoPlayerScrubDetails?>[];
+      final chapters = <String?>[];
+      final snaps = <String>[];
+      await tester.pumpWidget(
+        host(
+          NativeVideoPlayerProgressBar(
+            duration: const Duration(seconds: 60),
+            chapters: _chapters,
+            onSeek: _ignoreSeek,
+            hapticFeedback: false,
+            // Drawn elsewhere by the app: no bubble, callbacks still fire.
+            showPreview: false,
+            onPreviewChanged: previews.add,
+            onScrubChapterChanged: (c) => chapters.add(c?.title),
+            onSnap: (c) => snaps.add(c.title),
+          ),
+        ),
+      );
+      final gesture = await tester.startGesture(at(tester, 100));
+      await gesture.moveTo(at(tester, 150));
+      await tester.pump();
+      await gesture.moveTo(at(tester, 205));
+      await tester.pump();
+      expect(find.text('Part two'), findsNothing, reason: 'no bubble');
+      expect(previews.last?.chapter, _partTwo);
+      expect(previews.last?.snapped, isTrue);
+      expect(previews.last?.position, const Duration(seconds: 30));
+      await gesture.up();
+      await tester.pump();
+      await tester.pump();
+      expect(previews.last, isNull, reason: 'gone after release');
+      expect(chapters, ['Intro', 'Part two', null]);
+      expect(snaps, ['Part two']);
+    });
+
     testWidgets('showPreview: false shows no bubble', (tester) async {
       await tester.pumpWidget(
         host(
@@ -545,6 +581,37 @@ Outro
       // Not awaited: the cancel future never completes in the fake-async
       // zone, which would hang the test.
       unawaited(sub.cancel());
+    });
+
+    testWidgets('chapter changes reach control listeners', (tester) async {
+      await attach(
+        tester,
+        child: const Directionality(
+          textDirection: TextDirection.ltr,
+          child: SizedBox(),
+        ),
+      );
+      final events = <PlayerControlEvent>[];
+      controller.addControlListener((e) {
+        if (e.state == PlayerControlState.chapterChanged ||
+            e.state == PlayerControlState.chaptersChanged) {
+          events.add(e);
+        }
+      });
+      controller.setChapters(_chapters);
+      await sendPosition(tester, 31000);
+      await sendPosition(tester, 32000); // same chapter: no event
+      expect(events.map((e) => e.state), [
+        PlayerControlState.chaptersChanged,
+        PlayerControlState.chapterChanged,
+        PlayerControlState.chapterChanged,
+      ]);
+      expect(events.map((e) => e.data).toList(), [
+        {'count': 3},
+        {'index': 0, 'title': 'Intro', 'startMs': 0},
+        {'index': 1, 'title': 'Part two', 'startMs': 30000},
+      ]);
+      expect(controller.currentChapterIndex, 1);
     });
 
     testWidgets('next / previous chapter', (tester) async {

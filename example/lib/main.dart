@@ -1185,110 +1185,136 @@ class CinemaControls extends StatelessWidget {
                 ),
               ),
             ),
-            Positioned(
-              top: 6,
-              left: 14,
-              right: 6,
-              child: Row(
-                children: [
-                  if (c.isLive) ...[const _LiveDot(), const SizedBox(width: 8)],
-                  Expanded(
-                    child: Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  if (!compact) ...[
-                    _RoundIcon(
-                      icon: Icons.picture_in_picture_alt_rounded,
-                      onTap: c.enterPictureInPicture,
-                    ),
-                    if (ios)
-                      _RoundIcon(
-                        icon: Icons.airplay_rounded,
-                        onTap: c.showAirPlayPicker,
-                      ),
-                  ],
-                ],
-              ),
-            ),
-            Center(
-              child: state.hasError
-                  ? _RetryChip(onTap: () => c.load(url: c.url!, force: true))
-                  : busy
-                  ? const SizedBox.square(
-                      dimension: 44,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 3,
-                        color: Colors.white,
-                      ),
-                    )
-                  : Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (!compact && !c.isLive)
-                          _RoundIcon(
-                            icon: Icons.replay_10_rounded,
-                            size: 30,
-                            onTap: () => c.seekTo(
-                              c.currentPosition - const Duration(seconds: 10),
-                            ),
-                          ),
-                        const SizedBox(width: 18),
-                        _PlayPause(
-                          playing: state.isPlaying,
-                          onTap: () => state.isPlaying ? c.pause() : c.play(),
-                        ),
-                        const SizedBox(width: 18),
-                        if (!compact && !c.isLive)
-                          _RoundIcon(
-                            icon: Icons.forward_10_rounded,
-                            size: 30,
-                            onTap: () => c.seekTo(
-                              c.currentPosition + const Duration(seconds: 10),
-                            ),
-                          ),
-                      ],
-                    ),
-            ),
-            if (started)
-              Positioned(
-                left: 10,
-                right: 4,
-                bottom: 2,
-                child: Row(
+            Positioned.fill(
+              // Fullscreen covers the whole screen: keep the controls clear
+              // of the notch and the home indicator. Inline the player sits
+              // inside the page and needs no insets.
+              child: SafeArea(
+                top: c.isFullScreen,
+                bottom: c.isFullScreen,
+                left: c.isFullScreen,
+                right: c.isFullScreen,
+                child: Stack(
                   children: [
-                    Expanded(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                    Positioned(
+                      top: 6,
+                      left: 14,
+                      right: 6,
+                      child: Row(
                         children: [
-                          if (!compact) _ChapterChip(controller: c),
-                          Scrubber(controller: c, storyboard: storyboard),
+                          if (c.isLive) ...[
+                            const _LiveDot(),
+                            const SizedBox(width: 8),
+                          ],
+                          Expanded(
+                            child: Text(
+                              title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          if (!compact) ...[
+                            _RoundIcon(
+                              icon: Icons.picture_in_picture_alt_rounded,
+                              onTap: c.enterPictureInPicture,
+                            ),
+                            if (ios)
+                              _RoundIcon(
+                                icon: Icons.airplay_rounded,
+                                onTap: c.showAirPlayPicker,
+                              ),
+                          ],
                         ],
                       ),
                     ),
-                    if (compact)
-                      _RoundIcon(
-                        icon: c.volume == 0
-                            ? Icons.volume_off_rounded
-                            : Icons.volume_up_rounded,
-                        onTap: () => c.setVolume(c.volume == 0 ? 1 : 0),
-                      ),
-                    _RoundIcon(
-                      icon: c.isFullScreen
-                          ? Icons.fullscreen_exit_rounded
-                          : Icons.fullscreen_rounded,
-                      onTap: c.toggleFullScreen,
+                    Center(
+                      child: state.hasError
+                          ? _RetryChip(
+                              onTap: () => c.load(url: c.url!, force: true),
+                            )
+                          : busy
+                          ? const SizedBox.square(
+                              dimension: 44,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 3,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (!compact && !c.isLive)
+                                  _RoundIcon(
+                                    icon: Icons.replay_10_rounded,
+                                    size: 30,
+                                    onTap: () => c.seekTo(
+                                      c.currentPosition -
+                                          const Duration(seconds: 10),
+                                    ),
+                                  ),
+                                const SizedBox(width: 18),
+                                _PlayPause(
+                                  playing: state.isPlaying,
+                                  onTap: () =>
+                                      state.isPlaying ? c.pause() : c.play(),
+                                ),
+                                const SizedBox(width: 18),
+                                if (!compact && !c.isLive)
+                                  _RoundIcon(
+                                    icon: Icons.forward_10_rounded,
+                                    size: 30,
+                                    onTap: () => c.seekTo(
+                                      c.currentPosition +
+                                          const Duration(seconds: 10),
+                                    ),
+                                  ),
+                              ],
+                            ),
                     ),
+                    if (started)
+                      Positioned(
+                        left: 10,
+                        right: 4,
+                        bottom: 2,
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  if (!compact) _ChapterChip(controller: c),
+                                  Scrubber(
+                                    controller: c,
+                                    storyboard: storyboard,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (compact)
+                              _RoundIcon(
+                                icon: c.volume == 0
+                                    ? Icons.volume_off_rounded
+                                    : Icons.volume_up_rounded,
+                                onTap: () => c.setVolume(c.volume == 0 ? 1 : 0),
+                              ),
+                            _RoundIcon(
+                              icon: c.isFullScreen
+                                  ? Icons.fullscreen_exit_rounded
+                                  : Icons.fullscreen_rounded,
+                              onTap: c.toggleFullScreen,
+                            ),
+                          ],
+                        ),
+                      ),
                   ],
                 ),
               ),
+            ),
           ],
         );
       },

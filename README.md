@@ -419,7 +419,7 @@ NativeVideoPlayerProgressBar(
 )
 ```
 
-The controller knows which chapter is playing: `controller.currentChapter` and `currentChapterStream` (for a "Setting up ›" label), and `seekToNextChapter()` / `seekToPreviousChapter()` skip around. Previous restarts the current chapter when you're more than 3 s in, like a music player. A chapter runs until the next one starts. Chapters are ignored for live streams, and loading a different video clears them.
+The controller knows which chapter is playing: `controller.currentChapter` (and `currentChapterIndex`) with `currentChapterStream`, for a "Setting up ›" label anywhere in your overlay. Control listeners get it too, as `PlayerControlState.chapterChanged` (and `chaptersChanged` when the list changes), so an overlay that already rebuilds on `addControlListener` needs nothing extra. `seekToNextChapter()` / `seekToPreviousChapter()` skip around. Previous restarts the current chapter when you're more than 3 s in, like a music player. A chapter runs until the next one starts. Chapters are ignored for live streams, and loading a different video clears them.
 
 **Make it look like your app.** Every size, color and animation is in two style objects:
 
@@ -454,6 +454,17 @@ NativeVideoPlayerProgressBar(
 While you scrub, the bar keeps the overlay from hiding (`controller.holdOverlay()`, which leaves your own `lockOverlay()` alone), and the hide timer starts over when you let go. `onScrubStart`, `onScrubUpdate` and `onScrubEnd` are there for anything else, like a time label that follows the finger.
 
 Or replace the bubble entirely with `previewBuilder: (context, details) => ...` (you get the position, chapter, storyboard frame and whether it snapped).
+
+**Show the scrub somewhere else.** The bar reports what the finger is on:
+
+| Callback | When |
+|---|---|
+| `onScrubStart` / `onScrubUpdate` / `onScrubEnd` | the drag starts, moves (snapped position), ends (seek target) |
+| `onScrubChapterChanged` | the finger moves into another chapter; `null` when the drag ends |
+| `onSnap` | the drag snaps to a chapter start |
+| `onPreviewChanged` | anything in the preview changes (position, chapter, frame, snapped); `null` when it goes away |
+
+`onPreviewChanged` also fires with `showPreview: false`, so you can hide the bubble and draw the frame and title wherever you like, such as large in the middle of the video.
 
 **Your own values and seeking.** Pass `position`, `duration`, `bufferedPosition` or `isLive` to override what the controller reports, and `onSeek` to seek another way (e.g. while casting). Pass all of them and you don't need a controller at all, so the same bar works for an audio player.
 

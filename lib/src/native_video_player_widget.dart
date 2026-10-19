@@ -359,7 +359,12 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
     }
 
     // Restart hide timer on any control interaction (except time updates)
-    if (_overlayVisible && event.state != PlayerControlState.timeUpdated) {
+    // Playback-driven events are not interaction: they must not keep the
+    // overlay up.
+    if (_overlayVisible &&
+        event.state != PlayerControlState.timeUpdated &&
+        event.state != PlayerControlState.chapterChanged &&
+        event.state != PlayerControlState.chaptersChanged) {
       _startHideTimer();
     }
   }

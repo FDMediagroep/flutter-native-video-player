@@ -696,9 +696,7 @@ class NativeVideoPlayerController {
         _isLiveController.add(newState.isLive);
       }
       // Chapters are hidden for live streams.
-      if (_chapters.isNotEmpty && !_chaptersController.isClosed) {
-        _chaptersController.add(chapters);
-      }
+      if (_chapters.isNotEmpty) _emitChapters();
     }
     if (oldState.currentPosition != newState.currentPosition ||
         oldState.isLive != newState.isLive) {
@@ -2100,8 +2098,15 @@ class NativeVideoPlayerController {
   NativeVideoPlayerChapter? get currentChapter => _currentChapter;
   NativeVideoPlayerChapter? _currentChapter;
 
+  /// The index of [currentChapter] in [chapters], or -1.
+  int get currentChapterIndex =>
+      _currentChapter == null ? -1 : chapters.indexOf(_currentChapter!);
+
   /// Emits [currentChapter] whenever playback crosses into another chapter
-  /// (or the chapters change).
+  /// (or the chapters change). Control listeners get the same moment as a
+  /// [PlayerControlState.chapterChanged] event, and chapter list changes as
+  /// [PlayerControlState.chaptersChanged], so an overlay built on
+  /// [addControlListener] can show the chapter anywhere.
   Stream<NativeVideoPlayerChapter?> get currentChapterStream =>
       _currentChapterController.stream;
 
@@ -2117,10 +2122,25 @@ class NativeVideoPlayerController {
     if (listEquals(normalized, _chapters)) return;
     _chapters = normalized;
     if (_isDisposed) return;
-    if (!_chaptersController.isClosed) {
-      _chaptersController.add(this.chapters);
-    }
+    _emitChapters();
     _updateCurrentChapter();
+  }
+
+  void _emitChapters() {
+    final chapters = this.chapters;
+    if (!_chaptersController.isClosed) _chaptersController.add(chapters);
+    _notifyControlListeners(
+      PlayerControlEvent(
+        state: PlayerControlState.chaptersChanged,
+        data: {'count': chapters.length},
+      ),
+    );
+  }
+
+  void _notifyControlListeners(PlayerControlEvent event) {
+    for (final handler in List.of(_controlEventHandlers)) {
+      handler(event);
+    }
   }
 
   void _updateCurrentChapter() {
@@ -2130,9 +2150,20 @@ class NativeVideoPlayerController {
     );
     if (chapter == _currentChapter) return;
     _currentChapter = chapter;
-    if (!_isDisposed && !_currentChapterController.isClosed) {
+    if (_isDisposed) return;
+    if (!_currentChapterController.isClosed) {
       _currentChapterController.add(chapter);
     }
+    _notifyControlListeners(
+      PlayerControlEvent(
+        state: PlayerControlState.chapterChanged,
+        data: {
+          'index': chapter == null ? -1 : chapters.indexOf(chapter),
+          'title': chapter?.title,
+          'startMs': chapter?.start.inMilliseconds,
+        },
+      ),
+    );
   }
 
   /// Seeks to the start of the next chapter. Does nothing in the last

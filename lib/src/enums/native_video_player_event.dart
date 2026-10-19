@@ -30,6 +30,14 @@ enum PlayerControlState {
   timeUpdated,
   subtitleTrackChanged,
   audioTrackChanged,
+
+  /// Playback moved into another chapter (or out of all of them). Data:
+  /// `index` (-1 for none), `title` and `startMs` of the new chapter.
+  chapterChanged,
+
+  /// The video's chapters were set, cleared, or hidden/shown for live.
+  /// Data: `count`.
+  chaptersChanged,
 }
 
 /// Activity state event for playback changes

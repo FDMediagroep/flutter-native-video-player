@@ -162,6 +162,9 @@ class NativeVideoPlayerProgressBar extends StatefulWidget {
     this.onScrubStart,
     this.onScrubUpdate,
     this.onScrubEnd,
+    this.onScrubChapterChanged,
+    this.onSnap,
+    this.onPreviewChanged,
     this.semanticsLabel,
   }) : assert(
          controller != null || duration != null,
@@ -244,6 +247,19 @@ class NativeVideoPlayerProgressBar extends StatefulWidget {
   /// Called on release, with the position the bar seeks to.
   final ValueChanged<Duration>? onScrubEnd;
 
+  /// Called when the finger (or mouse) moves into another chapter, and
+  /// with null when scrubbing ends, e.g. to show the chapter title
+  /// somewhere else in the overlay while dragging.
+  final ValueChanged<NativeVideoPlayerChapter?>? onScrubChapterChanged;
+
+  /// Called each time the drag snaps to a chapter start.
+  final ValueChanged<NativeVideoPlayerChapter>? onSnap;
+
+  /// Called whenever what the preview shows changes (position, chapter,
+  /// storyboard frame, snapped), and with null when it goes away. Fires
+  /// with [showPreview] off too, so you can draw the preview elsewhere.
+  final ValueChanged<NativeVideoPlayerScrubDetails?>? onPreviewChanged;
+
   /// Accessibility label; the value is the position.
   final String? semanticsLabel;
 
@@ -313,6 +329,10 @@ class _NativeVideoPlayerProgressBarState
 
   /// The last preview shown, kept while it animates out.
   NativeVideoPlayerScrubDetails? _lastPreview;
+
+  /// What the scrub callbacks last reported, to call them on changes only.
+  NativeVideoPlayerScrubDetails? _reportedDetails;
+  int _reportedChapter = -1;
 
   /// Storyboard URLs already handed to [precacheImage], newest last.
   final List<String> _precached = [];
@@ -457,6 +477,8 @@ class _NativeVideoPlayerProgressBarState
     if (snapped != null && snapped != _snappedTo) {
       if (widget.hapticFeedback) unawaited(HapticFeedback.selectionClick());
       if (widget.style.snapPulse) unawaited(_pulse.forward(from: 0));
+      final chapter = NativeVideoPlayerChapters.chapterAt(_chapters, snapped);
+      if (chapter != null) widget.onSnap?.call(chapter);
     }
     _snappedTo = snapped;
     if (position == _scrub) return;
@@ -546,6 +568,32 @@ class _NativeVideoPlayerProgressBarState
     });
   }
 
+  /// Calls the preview/chapter callbacks after this frame when what they
+  /// report changed.
+  void _report(NativeVideoPlayerScrubDetails? details) {
+    final changed =
+        details?.position != _reportedDetails?.position ||
+        details?.chapterIndex != _reportedDetails?.chapterIndex ||
+        details?.thumbnail != _reportedDetails?.thumbnail ||
+        details?.snapped != _reportedDetails?.snapped ||
+        (details == null) != (_reportedDetails == null);
+    if (!changed) return;
+    _reportedDetails = details;
+    final chapterIndex = details?.chapterIndex ?? -1;
+    final chapterChanged = chapterIndex != _reportedChapter;
+    _reportedChapter = chapterIndex;
+    if (widget.onPreviewChanged == null &&
+        (widget.onScrubChapterChanged == null || !chapterChanged)) {
+      return;
+    }
+    // Callbacks usually call setState on a parent: not during this build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      widget.onPreviewChanged?.call(details);
+      if (chapterChanged) widget.onScrubChapterChanged?.call(details?.chapter);
+    });
+  }
+
   // ─── Build ──────────────────────────────────────────────────────────
 
   @override
@@ -605,10 +653,7 @@ class _NativeVideoPlayerProgressBarState
 
         // Preview bubble.
         NativeVideoPlayerScrubDetails? details;
-        if (focus != null &&
-            widget.showPreview &&
-            !_isLive &&
-            duration > Duration.zero) {
+        if (focus != null && !_isLive && duration > Duration.zero) {
           final index = NativeVideoPlayerChapters.indexAt(chapters, focus);
           details = NativeVideoPlayerScrubDetails(
             position: focus,
@@ -618,13 +663,16 @@ class _NativeVideoPlayerProgressBarState
             thumbnail: widget.storyboard?.thumbnailAt(focus),
             snapped: _dragging && _snappedTo != null,
           );
-          if (widget.previewBuilder == null &&
-              !NativeVideoPlayerScrubPreview.hasContent(
-                details,
-                widget.previewStyle,
-              )) {
-            details = null;
-          }
+        }
+        _report(details);
+        if (details != null &&
+            (!widget.showPreview ||
+                (widget.previewBuilder == null &&
+                    !NativeVideoPlayerScrubPreview.hasContent(
+                      details,
+                      widget.previewStyle,
+                    )))) {
+          details = null;
         }
         if (details != null) {
           _lastPreview = details;

@@ -29,6 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the frame out. `NativeVideoPlayerScrubPreview` is the bubble on its own;
   `NativeVideoPlayerChapters.segments` / `snapTarget` the math for a bar of
   your own.
+- Chapter events: `PlayerControlState.chapterChanged` (with `index`, `title`,
+  `startMs`) and `chaptersChanged` reach control listeners, next to
+  `currentChapterStream` / `chaptersStream` and `currentChapterIndex`. They
+  don't restart the overlay's hide timer. The progress bar adds
+  `onScrubChapterChanged`, `onSnap` and `onPreviewChanged` (which also fires
+  with `showPreview: false`, to draw the preview elsewhere).
 - `controller.holdOverlay()` keeps the custom overlay visible until the
   returned callback runs, without touching `lockOverlay()`.
   `NativeVideoPlayerProgressBar` holds it while the viewer scrubs, so the
