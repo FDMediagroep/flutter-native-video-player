@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:better_native_video_player/better_native_video_player.dart';
 import 'package:better_native_video_player/src/poster/poster_layer.dart';
 import 'package:flutter/services.dart';
