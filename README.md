@@ -41,7 +41,7 @@ All of this is one file: [`example/lib/main.dart`](example/lib/main.dart). Run i
 - [Why this player](#why-this-player)
 - [Getting started](#getting-started)
 - [Playing video](#playing-video) — sources, headers, resume positions, controls, looping
-- [Your own controls](#your-own-controls) — overlays, posters, scrub previews
+- [Your own controls](#your-own-controls) — overlays, posters, scrub previews, seek bar & chapters
 - [Fullscreen](#fullscreen)
 - [Picture-in-Picture](#picture-in-picture)
 - [AirPlay](#airplay-ios) · [Chromecast](#chromecast)
@@ -379,11 +379,87 @@ final board = StoryboardThumbnails.bunny(
   duration: videoLength,
 );
 
+// …or straight from the HLS URL you play. A signed URL keeps its token.
+final board = StoryboardThumbnails.bunnyFromPlaylistUrl(playlistUrl, duration: videoLength);
+
 final thumb = board.thumbnailAt(dragPosition);
 // thumb.url + thumb.region: crop that rectangle out of the sprite sheet
 ```
 
-The showcase's `_ScrubPreview` widget crops and shows the frame.
+Behind a CDN that checks the `Referer`? Pass headers: `StoryboardThumbnails.fromUrl(url, headers: {...})` for the VTT, and `storyboardHeaders:` on the seek bar below for the images.
+
+Hand the storyboard to [`NativeVideoPlayerProgressBar`](#seek-bar--chapters) and it does the rest. If you draw your own bar, `NativeVideoPlayerScrubPreview` is the bubble on its own.
+
+### Seek bar & chapters
+
+<img src="https://raw.githubusercontent.com/plug-and-pay/flutter-native-video-player/master/doc/media/chapters.webp" width="420" alt="Scrubbing a seek bar split into chapters, with the chapter title in the preview">
+
+`NativeVideoPlayerProgressBar` is a seek bar for your overlay. It shows the buffered range and a scrub preview, and splits into chapters like YouTube:
+
+- The bar is split into one segment per chapter, with a small gap where each chapter starts. The segment under your finger grows a little.
+- While you drag, the bubble above the bar shows the storyboard frame, the chapter title and the time.
+- **Snapping:** when the drag comes within 8 px of a chapter start, it jumps to that start, with a light haptic tick. Let go and it seeks there. So landing exactly on "Part two" is easy.
+
+```dart
+// Chapters, from a description...
+final chapters = NativeVideoPlayerChapters.parseText('''
+0:00 Intro
+1:23 Setting up
+12:05 Outro
+''');
+// ...or from a WebVTT chapters track
+final chapters = await NativeVideoPlayerChapters.fromVttUrl('https://cdn.example.com/chapters.vtt');
+
+await controller.load(url: url, chapters: chapters); // or controller.setChapters(chapters)
+
+// In your overlay
+NativeVideoPlayerProgressBar(
+  controller: controller,
+  storyboard: board, // optional scrub thumbnails
+)
+```
+
+The controller knows which chapter is playing: `controller.currentChapter` and `currentChapterStream` (for a "Setting up ›" label), and `seekToNextChapter()` / `seekToPreviousChapter()` skip around. Previous restarts the current chapter when you're more than 3 s in, like a music player. A chapter runs until the next one starts. Chapters are ignored for live streams, and loading a different video clears them.
+
+**Make it look like your app.** Every size, color and animation is in two style objects:
+
+```dart
+NativeVideoPlayerProgressBar(
+  controller: controller,
+  storyboard: board,
+  storyboardHeaders: {'Referer': 'https://example.com'},
+  showPreview: controller.isFullScreen, // no bubble on the small inline player
+  snapDistance: 8,                      // px; snapToChapters: false turns it off
+  style: const NativeVideoPlayerProgressBarStyle(
+    barHeight: 2,
+    expandedBarHeight: 7, // the whole bar thickens while touched
+    thumbRadius: 0,       // no thumb at rest...
+    expandedThumbRadius: 10, // ...it grows in when touched
+    collapseDelay: Duration(seconds: 2),
+    playedColor: Colors.pink,
+    bufferedColor: Colors.white,
+    backgroundColor: Colors.white60,
+  ),
+  previewStyle: NativeVideoPlayerScrubPreviewStyle(
+    backgroundColor: Colors.grey.shade900, // a tooltip bubble...
+    padding: const EdgeInsets.all(8),
+    borderRadius: BorderRadius.circular(4),
+    arrowSize: const Size(8, 6),           // ...with an arrow
+    showThumbnail: true, showChapterTitle: true, showTime: true,
+    timeFormatter: (d) => myFormat(d),
+  ),
+)
+```
+
+While you scrub, the bar keeps the overlay from hiding (`controller.holdOverlay()`, which leaves your own `lockOverlay()` alone), and the hide timer starts over when you let go. `onScrubStart`, `onScrubUpdate` and `onScrubEnd` are there for anything else, like a time label that follows the finger.
+
+Or replace the bubble entirely with `previewBuilder: (context, details) => ...` (you get the position, chapter, storyboard frame and whether it snapped).
+
+**Your own values and seeking.** Pass `position`, `duration`, `bufferedPosition` or `isLive` to override what the controller reports, and `onSeek` to seek another way (e.g. while casting). Pass all of them and you don't need a controller at all, so the same bar works for an audio player.
+
+**Images.** Storyboard images load with `storyboardHeaders`, or through your own provider (`storyboardImageProvider: (url, headers) => CachedNetworkImageProvider(url, headers: headers)`). The sheets around the playing position are loaded ahead (`storyboardPrecacheLimit`, default 4), so the frame is usually there before your finger is. An image that fails to load is simply left out of the bubble.
+
+**Your own bar.** The math is public too: `NativeVideoPlayerChapters.segments(chapters, duration)` gives each segment's start and end as fractions of the bar, and `snapTarget(chapters, position, threshold:)` the chapter start to snap to.
 
 ## Fullscreen
 
@@ -914,6 +990,8 @@ Remove listeners with `removeActivityListener` / `removeControlListener` before 
 | `NativeVideoPlayerConfig` | global tuning for feeds and devices |
 | `NativeVideoPlayerPoster` | thumbnail, preview animation, badge |
 | `StoryboardThumbnails` | scrub previews from VTT, sprite grids or Bunny Stream |
+| `NativeVideoPlayerProgressBar` | seek bar with chapters, snapping and scrub preview |
+| `NativeVideoPlayerChapters` | chapter parsing (description text, WebVTT) and seek-bar math |
 | `NativeVideoPlayerPlaylist` | sequential playback with auto-advance |
 | `PositionCheckpoints` | throttled resume positions |
 | `PlaybackAnalytics` | startup, stalls, watched time, completion |

@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Chapters, like YouTube.** `NativeVideoPlayerChapter` (start + title,
+  optional thumbnail), set with `controller.setChapters(...)` or
+  `load(chapters: ...)`. `NativeVideoPlayerChapters.parseText` reads the
+  "0:00 Intro" list from a video description, `parseVtt` / `fromVttUrl` a
+  WebVTT chapters track. The controller reports `currentChapter` and
+  `currentChapterStream`, and `seekToNextChapter()` / `seekToPreviousChapter()`
+  skip between them. Chapters are ignored for live streams; loading another
+  URL clears them.
+- **`NativeVideoPlayerProgressBar`**, a seek bar for custom overlays: buffered
+  range, chapter segments with small gaps, the touched segment grows, drags
+  snap to a chapter start within `snapDistance` (8 px) with a haptic tick,
+  and an animated scrub preview with the storyboard frame, chapter title and
+  time. Everything is styleable (`NativeVideoPlayerProgressBarStyle`,
+  `NativeVideoPlayerScrubPreviewStyle`, or a `previewBuilder`), `showPreview`
+  turns the bubble off, and `position` / `duration` / `onSeek` overrides let
+  it run without a controller (casting, audio). Storyboard images take
+  `storyboardHeaders` or a custom image provider, are precached around the
+  playing position (`storyboardPrecacheLimit`), and a failed load just leaves
+  the frame out. `NativeVideoPlayerScrubPreview` is the bubble on its own;
+  `NativeVideoPlayerChapters.segments` / `snapTarget` the math for a bar of
+  your own.
+- `controller.holdOverlay()` keeps the custom overlay visible until the
+  returned callback runs, without touching `lockOverlay()`.
+  `NativeVideoPlayerProgressBar` holds it while the viewer scrubs, so the
+  controls never hide mid-drag.
+- `StoryboardThumbnails.bunnyFromPlaylistUrl(playlistUrl, duration:)`, which
+  keeps a signed URL's token, and `headers:` on `StoryboardThumbnails.fromUrl`.
+
 ## [1.7.1] - 2026-10-20
 
 ### Fixed
@@ -47,6 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - The pub.dev screenshots are square tiles with a caption, so they fill the
   package page's preview.
+
 
 ## [1.7.0] - 2026-10-19
 

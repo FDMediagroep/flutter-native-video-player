@@ -119,6 +119,18 @@ final _bunnyStoryboard = StoryboardThumbnails.fromUniformGrid(
   framesPerSprite: 60,
 );
 
+/// Chapters for Big Buck Bunny, written the way a video description lists
+/// them. `NativeVideoPlayerChapters.parseVtt` reads a WebVTT chapters track.
+final _bunnyChapters = NativeVideoPlayerChapters.parseText('''
+0:00 Morning in the meadow
+1:12 A butterfly visits
+2:05 Three troublemakers
+3:35 The last straw
+5:20 Building the traps
+7:10 Payback
+9:15 Credits
+''');
+
 /// Big Buck Bunny has no dialogue, so these are sound captions: sidecar
 /// WebVTT, rendered and styled by Flutter. Pass `.url(...)` or `.file(...)`
 /// for captions that live elsewhere.
@@ -361,6 +373,7 @@ class _WatchTabState extends State<WatchTab> {
     await c.load(
       url: Films.bigBuckBunny.url,
       sidecarSubtitles: _bunnyCaptions,
+      chapters: _bunnyChapters,
       headers: const {'User-Agent': 'better_native_video_player showcase'},
     );
     // App-wide AirPlay route detection, once a player exists (iOS only;
@@ -1251,7 +1264,14 @@ class CinemaControls extends StatelessWidget {
                 child: Row(
                   children: [
                     Expanded(
-                      child: Scrubber(controller: c, storyboard: storyboard),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (!compact) _ChapterChip(controller: c),
+                          Scrubber(controller: c, storyboard: storyboard),
+                        ],
+                      ),
                     ),
                     if (compact)
                       _RoundIcon(
@@ -1276,8 +1296,9 @@ class CinemaControls extends StatelessWidget {
   }
 }
 
-/// Seek bar with the buffered range, scrub-preview thumbnails and, for
-/// live streams, a DVR window with a jump-to-live button.
+/// Seek bar with the buffered range, chapters, scrub-preview thumbnails
+/// and, for live streams, a DVR window with a jump-to-live button. The bar
+/// itself is the package's [NativeVideoPlayerProgressBar].
 class Scrubber extends StatefulWidget {
   const Scrubber({super.key, required this.controller, this.storyboard});
 
@@ -1289,21 +1310,15 @@ class Scrubber extends StatefulWidget {
 }
 
 class _ScrubberState extends State<Scrubber> {
-  double? _dragMs;
+  /// Where the drag points, for the time label.
+  Duration? _drag;
 
   @override
   Widget build(BuildContext context) {
     final c = widget.controller;
-    final total = c.duration.inMilliseconds.toDouble();
-    final max = total <= 0 ? 1.0 : total;
-    final position = (_dragMs ?? c.currentPosition.inMilliseconds.toDouble())
-        .clamp(0.0, max);
-    final buffered = c.bufferedPosition.inMilliseconds.toDouble().clamp(
-      0.0,
-      max,
-    );
     // While dragging, show where the drag lands rather than where it plays.
-    final behind = Duration(milliseconds: (max - position).round());
+    final position = _drag ?? c.currentPosition;
+    final behind = c.duration - position;
     final atLiveEdge = c.isLive && behind.inSeconds < 10;
     const labelStyle = TextStyle(
       color: Colors.white,
@@ -1311,115 +1326,81 @@ class _ScrubberState extends State<Scrubber> {
       fontFeatures: [FontFeature.tabularFigures()],
     );
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final thumb = _dragMs == null
-            ? null
-            : widget.storyboard?.thumbnailAt(
-                Duration(milliseconds: _dragMs!.round()),
-              );
-        return Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Row(
-              children: [
-                if (!c.isLive)
-                  Text(
-                    _fmt(Duration(milliseconds: position.round())),
-                    style: labelStyle,
-                  ),
-                Expanded(
-                  child: Slider(
-                    value: position,
-                    max: max,
-                    secondaryTrackValue: c.isLive ? null : buffered,
-                    activeColor: c.isLive ? Palette.live : null,
-                    onChangeStart: (v) => setState(() => _dragMs = v),
-                    onChanged: (v) => setState(() => _dragMs = v),
-                    onChangeEnd: (v) async {
-                      await c.seekTo(Duration(milliseconds: v.round()));
-                      setState(() => _dragMs = null);
-                    },
-                  ),
-                ),
-                if (c.isLive)
-                  _LivePill(
-                    atEdge: atLiveEdge,
-                    behind: behind,
-                    onTap: c.seekToLiveEdge,
-                  )
-                else
-                  Text(_fmt(c.duration), style: labelStyle),
-              ],
+    return Row(
+      children: [
+        if (!c.isLive) Text(_fmt(position), style: labelStyle),
+        const SizedBox(width: 10),
+        Expanded(
+          child: NativeVideoPlayerProgressBar(
+            controller: c,
+            storyboard: widget.storyboard,
+            style: NativeVideoPlayerProgressBarStyle(
+              playedColor: c.isLive ? Palette.live : Palette.violet,
             ),
-            if (thumb != null)
-              Positioned(
-                bottom: 40,
-                left: ((position / max) * constraints.maxWidth - 80).clamp(
-                  0.0,
-                  constraints.maxWidth - 160,
-                ),
-                child: _ScrubPreview(
-                  thumbnail: thumb,
-                  label: _fmt(Duration(milliseconds: position.round())),
-                ),
-              ),
-          ],
-        );
-      },
+            onScrubUpdate: (p) => setState(() => _drag = p),
+            onScrubEnd: (_) => setState(() => _drag = null),
+          ),
+        ),
+        const SizedBox(width: 10),
+        if (c.isLive)
+          _LivePill(
+            atEdge: atLiveEdge,
+            behind: behind.isNegative ? Duration.zero : behind,
+            onTap: c.seekToLiveEdge,
+          )
+        else
+          Text(_fmt(c.duration), style: labelStyle),
+      ],
     );
   }
 }
 
-/// One frame cut out of a storyboard sprite sheet.
-class _ScrubPreview extends StatelessWidget {
-  const _ScrubPreview({required this.thumbnail, required this.label});
+/// The chapter that is playing, tap to skip to the next one (YouTube puts
+/// this next to the time).
+class _ChapterChip extends StatelessWidget {
+  const _ChapterChip({required this.controller});
 
-  final StoryboardThumbnail thumbnail;
-  final String label;
+  final NativeVideoPlayerController controller;
 
   @override
   Widget build(BuildContext context) {
-    const width = 160.0;
-    final region = thumbnail.region ?? const Rect.fromLTWH(0, 0, 160, 90);
-    final scale = width / region.width;
-    final ImageProvider sheet = thumbnail.url.startsWith('http')
-        ? NetworkImage(thumbnail.url)
-        : AssetImage(thumbnail.url);
-    return Column(
-      children: [
-        Container(
-          width: width,
-          height: region.height * scale,
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.white, width: 2),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: OverflowBox(
-            alignment: Alignment.topLeft,
-            maxWidth: double.infinity,
-            maxHeight: double.infinity,
-            child: Transform.translate(
-              offset: Offset(-region.left * scale, -region.top * scale),
-              child: Transform.scale(
-                scale: scale,
-                alignment: Alignment.topLeft,
-                child: Image(image: sheet, filterQuality: FilterQuality.medium),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w700,
-            shadows: [Shadow(blurRadius: 6)],
-          ),
-        ),
-      ],
+    return StreamBuilder<NativeVideoPlayerChapter?>(
+      stream: controller.currentChapterStream,
+      initialData: controller.currentChapter,
+      builder: (context, snapshot) {
+        final chapter = snapshot.data;
+        return AnimatedSwitcher(
+          duration: const Duration(milliseconds: 200),
+          child: chapter == null
+              ? const SizedBox.shrink()
+              : GestureDetector(
+                  key: ValueKey(chapter.start),
+                  onTap: controller.seekToNextChapter,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          chapter.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const Icon(
+                        Icons.chevron_right_rounded,
+                        color: Colors.white,
+                        size: 16,
+                      ),
+                    ],
+                  ),
+                ),
+        );
+      },
     );
   }
 }
