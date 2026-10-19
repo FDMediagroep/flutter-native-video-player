@@ -200,6 +200,32 @@ class NativeVideoPlayerController {
   /// Map of platform view IDs to their contexts
   final Map<int, BuildContext> _platformViewContexts = <int, BuildContext>{};
 
+  /// Per view: a snapshot of the Flutter layers it draws over the video
+  /// (poster, controls), flown into fullscreen while there is no video frame.
+  final Map<int, Future<Uint8List?> Function()> _viewSnapshots =
+      <int, Future<Uint8List?> Function()>{};
+
+  /// Internal: [NativeVideoPlayer] hands over how to snapshot its layers.
+  void registerViewSnapshot(
+    int platformViewId,
+    Future<Uint8List?> Function() snapshot,
+  ) {
+    _viewSnapshots[platformViewId] = snapshot;
+  }
+
+  /// Whether the player has a video frame to fly: something was loaded and
+  /// got past loading. An app that loads only on the first play has none
+  /// before that, and the black video would fly as a black box.
+  bool get _hasVideoFrame {
+    final PlayerActivityState state = _state.activityState;
+    return _url != null &&
+        !state.isIdle &&
+        !state.isInitializing &&
+        !state.isInitialized &&
+        !state.isLoading &&
+        !state.hasError;
+  }
+
   /// Overlay builder to use in fullscreen mode
   /// This is passed from NativeVideoPlayer widget
   Widget Function(BuildContext, NativeVideoPlayerController)? _overlayBuilder;
@@ -1577,6 +1603,7 @@ class NativeVideoPlayerController {
   void onPlatformViewDisposed(int platformViewId) {
     _platformViewIds.remove(platformViewId);
     _platformViewContexts.remove(platformViewId);
+    _viewSnapshots.remove(platformViewId);
     _textureViewIds.remove(platformViewId);
     if (_textureIdsByView.remove(platformViewId) != null) {
       _activeTextureId.value = _textureIdsByView.isEmpty
@@ -1708,6 +1735,7 @@ class NativeVideoPlayerController {
 
     // An A-B range only makes sense for the video it was set on.
     _playbackRange = null;
+    _pendingSeekTarget = null;
 
     // The new source reports whether it is live with its first time update.
     if (_state.isLive) _updateState(_state.copyWith(isLive: false));
@@ -1896,12 +1924,40 @@ class NativeVideoPlayerController {
   /// For a live stream the position is within the seekable (DVR) window,
   /// the way [currentPosition] reports it.
   Future<void> seekTo(Duration position) async {
+    final Duration target = position.isNegative ? Duration.zero : position;
+    _pendingSeekTarget = target;
+    _pendingSeekSince = DateTime.now();
+    // Show the target right away; the native side confirms it shortly.
+    _updateState(_state.copyWith(currentPosition: target));
     await _methodChannel?.seekTo(position);
+  }
+
+  /// Where the last [seekTo] is heading while position updates sent before
+  /// it can still arrive: those are dropped until one lands near the target
+  /// or [_seekSettleTimeout] passes, so a seek bar doesn't jump back first.
+  Duration? _pendingSeekTarget;
+  DateTime? _pendingSeekSince;
+  static const Duration _seekSettleTimeout = Duration(seconds: 2);
+  static const Duration _seekSettleTolerance = Duration(milliseconds: 1500);
+
+  /// Whether a reported [position] is a leftover from before the last seek.
+  bool _isStaleAfterSeek(Duration position) {
+    final Duration? target = _pendingSeekTarget;
+    final DateTime? since = _pendingSeekSince;
+    if (target == null || since == null) return false;
+    if (DateTime.now().difference(since) > _seekSettleTimeout ||
+        (position - target).abs() <= _seekSettleTolerance) {
+      _pendingSeekTarget = null;
+      _pendingSeekSince = null;
+      return false;
+    }
+    return true;
   }
 
   /// Jumps a live stream back to its live edge, for a "Live" button after
   /// the viewer paused or scrubbed back. Does nothing for VOD.
   Future<void> seekToLiveEdge() async {
+    _pendingSeekTarget = null;
     await _methodChannel?.seekToLiveEdge();
   }
 
@@ -2794,9 +2850,19 @@ class NativeVideoPlayerController {
         _textureViewIds.contains(viewId);
     if (defaultTargetPlatform == TargetPlatform.android) {
       if (!androidTexture) return null;
+      // Nothing loaded yet: fly what the player shows in Flutter instead.
+      final bool hasFrame = _hasVideoFrame;
+      final Uint8List? layers = hasFrame
+          ? null
+          : await _viewSnapshots[viewId]?.call();
+      if (!hasFrame && layers == null) return null;
+      if (layers != null && context.mounted) {
+        await precacheImage(MemoryImage(layers), context);
+      }
+      if (!context.mounted) return null;
       return FullscreenHeroFlight(
-        poster: _posterFrame,
-        sharedTexture: _activeTextureId,
+        poster: layers ?? _posterFrame,
+        sharedTexture: hasFrame ? _activeTextureId : null,
         startRect: startRect,
         inlineRect: () => context.mounted ? _globalRectOf(context) : null,
         capturePoster: () async => null,
@@ -2833,11 +2899,17 @@ class NativeVideoPlayerController {
     final int? liveTextureId = await liveTexture;
     void disposeLiveTexture(int textureId) =>
         unawaited(VideoPlayerMethodChannel.disposeFlightTexture(textureId));
-    if (poster == null || !context.mounted) {
+    // No frame (nothing loaded yet): fly what the player shows in Flutter.
+    final Uint8List? flown =
+        poster ??
+        (_hasVideoFrame || !context.mounted
+            ? null
+            : await _viewSnapshots[viewId]?.call());
+    if (flown == null || !context.mounted) {
       if (liveTextureId != null) disposeLiveTexture(liveTextureId);
       return null;
     }
-    await precacheImage(MemoryImage(poster), context);
+    await precacheImage(MemoryImage(flown), context);
     if (!context.mounted) {
       if (liveTextureId != null) disposeLiveTexture(liveTextureId);
       return null;
@@ -2846,11 +2918,11 @@ class NativeVideoPlayerController {
       createLiveTexture: createLiveTexture,
       disposeLiveTexture: disposeLiveTexture,
       liveTextureId: liveTextureId,
-      poster: poster,
+      poster: flown,
       startRect: startRect,
       inlineRect: () => context.mounted ? _globalRectOf(context) : null,
       capturePoster: capture,
-      videoAspectRatio: await _aspectRatioOf(poster),
+      videoAspectRatio: await _aspectRatioOf(flown),
       onReturn: () => unawaited(FullscreenManager.restoreSystemUi()),
       onLanding: () => _landFlight(viewId!),
       onDone: () => _fullscreenFlightPhase.value = FullscreenFlightPhase.none,
@@ -3068,6 +3140,7 @@ class NativeVideoPlayerController {
     // Clear platform view references
     _platformViewIds.clear();
     _platformViewContexts.clear();
+    _viewSnapshots.clear();
     _fullscreenViewIds.clear();
     _completeFullscreenViewsDisposed();
     _primaryPlatformViewId = null;
@@ -3215,6 +3288,7 @@ class NativeVideoPlayerController {
     // Clear platform view references
     _platformViewIds.clear();
     _platformViewContexts.clear();
+    _viewSnapshots.clear();
     _textureViewIds.clear();
     _fullscreenViewIds.clear();
     _completeFullscreenViewsDisposed();

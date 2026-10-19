@@ -151,6 +151,7 @@ void main() {
       var seeks = calls.where((c) => c.method == 'seekTo').toList();
       expect((seeks.last.arguments as Map)['milliseconds'], 10000);
 
+      await sendEvent(tester, {'event': 'seek', 'position': 10000});
       await sendPosition(tester, 15000); // inside: nothing happens
       await sendPosition(tester, 20100); // past end: loop
       seeks = calls.where((c) => c.method == 'seekTo').toList();
@@ -473,6 +474,38 @@ img.jpg#xywh=oops,0,160
 
       final call = calls.lastWhere((c) => c.method == 'seekToLiveEdge');
       expect((call.arguments as Map)['viewId'], viewId);
+    });
+  });
+
+  group('seek', () {
+    testWidgets('position updates from before a seek are dropped', (
+      tester,
+    ) async {
+      await attachView(tester);
+      await sendPosition(tester, 10000);
+
+      await controller.seekTo(const Duration(seconds: 30));
+      // Shown right away, before native confirms.
+      expect(controller.currentPosition, const Duration(seconds: 30));
+
+      // A tick sent before the seek arrives late: ignored.
+      await sendPosition(tester, 10500);
+      expect(controller.currentPosition, const Duration(seconds: 30));
+
+      // The first tick near the target is taken, and so is everything after.
+      await sendPosition(tester, 30400);
+      expect(controller.currentPosition, const Duration(milliseconds: 30400));
+      await sendPosition(tester, 12000);
+      expect(controller.currentPosition, const Duration(seconds: 12));
+    });
+
+    testWidgets('a new load forgets a pending seek', (tester) async {
+      await attachView(tester);
+      await controller.seekTo(const Duration(seconds: 30));
+      await controller.load(url: 'https://example.com/other.mp4', force: true);
+
+      await sendPosition(tester, 1000);
+      expect(controller.currentPosition, const Duration(seconds: 1));
     });
   });
 }

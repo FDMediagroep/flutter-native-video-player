@@ -13,6 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Dart fullscreen opened from (and flew back into) the first view that was
   attached, the tile under the page on top. It now uses the view on the top
   route, then the most recently attached one.
+- **Fullscreen of a video that isn't loaded yet went through a black
+  screen.** An app that loads a video only on its first play (showing its own
+  thumbnail until then) had no frame to fly, so fullscreen faded through
+  black on the way in and out. The flight now carries what the player shows
+  in Flutter (its poster and controls) when there is no video frame.
+- **The seek bar jumped back after a seek.** Position updates sent just
+  before a seek arrived after it, so the position snapped back to the old
+  time before the new one. `seekTo` now shows the target right away and
+  drops those leftovers until the native seek is done.
+
+### Changed
+- The pub.dev screenshots are square tiles with a caption, so they fill the
+  package page's preview.
 
 ## [1.7.0] - 2026-10-19
 

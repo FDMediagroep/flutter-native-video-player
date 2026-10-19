@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -77,6 +78,50 @@ class NativeVideoPlayer extends StatefulWidget {
 
 class _NativeVideoPlayerState extends State<NativeVideoPlayer>
     with SingleTickerProviderStateMixin {
+  /// The Flutter layers over the video (poster, controls overlay), which
+  /// fly into fullscreen in place of the video while it has no frame yet.
+  final GlobalKey _posterBoundaryKey = GlobalKey();
+  final GlobalKey _overlayBoundaryKey = GlobalKey();
+
+  /// What this player shows in Flutter now (poster under overlay, on black),
+  /// as PNG. Null when neither layer is painted.
+  Future<Uint8List?> _snapshotLayers() async {
+    if (!mounted) return null;
+    final double pixelRatio = MediaQuery.devicePixelRatioOf(context);
+    final List<ui.Image> layers = <ui.Image>[];
+    for (final GlobalKey key in <GlobalKey>[
+      _posterBoundaryKey,
+      _overlayBoundaryKey,
+    ]) {
+      final RenderObject? boundary = key.currentContext?.findRenderObject();
+      if (boundary is! RenderRepaintBoundary || !boundary.hasSize) continue;
+      try {
+        layers.add(await boundary.toImage(pixelRatio: pixelRatio));
+      } catch (_) {
+        // Not painted yet (e.g. a hidden overlay): leave that layer out.
+      }
+    }
+    if (layers.isEmpty) return null;
+    final int width = layers.first.width;
+    final int height = layers.first.height;
+    final ui.PictureRecorder recorder = ui.PictureRecorder();
+    final Canvas canvas = Canvas(recorder)
+      ..drawRect(
+        Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
+        Paint()..color = const Color(0xFF000000),
+      );
+    for (final ui.Image layer in layers) {
+      canvas.drawImage(layer, Offset.zero, Paint());
+      layer.dispose();
+    }
+    final ui.Image image = await recorder.endRecording().toImage(width, height);
+    final ByteData? bytes = await image.toByteData(
+      format: ui.ImageByteFormat.png,
+    );
+    image.dispose();
+    return bytes?.buffer.asUint8List();
+  }
+
   int? _platformViewId;
   late AnimationController _overlayAnimationController;
   late Animation<double> _overlayOpacity;
@@ -509,6 +554,7 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
       widget.controller.registerFullscreenView(id);
     }
     await widget.controller.onPlatformViewCreated(id, context);
+    widget.controller.registerViewSnapshot(id, _snapshotLayers);
     // The first layout usually happens before the platform view exists, so
     // report the viewport size now that there is a native receiver.
     _maybeReportViewportSize();
@@ -694,6 +740,7 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
         widget.controller.registerFullscreenView(viewId);
       }
       await widget.controller.onPlatformViewCreated(viewId, context);
+      widget.controller.registerViewSnapshot(viewId, _snapshotLayers);
       _maybeReportViewportSize();
     } catch (e) {
       debugPrint('NativeVideoPlayer: texture backend creation failed: $e');
@@ -938,11 +985,14 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
     final Widget? posterLayer = widget.poster == null
         ? null
         : Positioned.fill(
-            child: whileVideoIn(
-              PosterLayer(
-                poster: widget.poster!,
-                controller: widget.controller,
-                hasCustomControls: widget.overlayBuilder != null,
+            child: RepaintBoundary(
+              key: _posterBoundaryKey,
+              child: whileVideoIn(
+                PosterLayer(
+                  poster: widget.poster!,
+                  controller: widget.controller,
+                  hasCustomControls: widget.overlayBuilder != null,
+                ),
               ),
             ),
           );
@@ -973,6 +1023,7 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
           // composites outside Flutter's raster cache)
           whileVideoIn(
             RepaintBoundary(
+              key: _overlayBoundaryKey,
               child: FadeTransition(
                 opacity: _overlayOpacity,
                 child: GestureDetector(

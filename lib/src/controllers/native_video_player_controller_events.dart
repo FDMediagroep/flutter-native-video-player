@@ -438,6 +438,12 @@ extension _ControllerEventPlumbing on NativeVideoPlayerController {
         );
       }
 
+      // The native seek is done: time updates from here on are current
+      // (earlier ones arrived before this event).
+      if (controlEvent.state == PlayerControlState.seeked) {
+        _pendingSeekTarget = null;
+      }
+
       // Handle time update events
       if (controlEvent.state == PlayerControlState.timeUpdated) {
         if (controlEvent.data != null) {
@@ -465,9 +471,13 @@ extension _ControllerEventPlumbing on NativeVideoPlayerController {
 
           // Update position, duration, and buffered position
           // Don't update activityState here - it's handled by the debounced buffering logic
+          final Duration reported = Duration(milliseconds: position);
           _updateState(
             _state.copyWith(
-              currentPosition: Duration(milliseconds: position),
+              // A leftover from before a seek keeps the seek's target.
+              currentPosition: _isStaleAfterSeek(reported)
+                  ? _state.currentPosition
+                  : reported,
               duration: newDuration,
               bufferedPosition: Duration(milliseconds: bufferedPosition),
               controlState: controlEvent.state,
