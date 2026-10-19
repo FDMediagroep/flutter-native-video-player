@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **iOS: a tile scrolled back while its PiP window is open plays the video
+  next to the window.** Scrolling a feed tile far enough disposes its platform
+  view; since 1.6.5 the native view is kept while its window is open, and
+  scrolling back creates a new view for the same controller. That view got a
+  surface of its own, so the tile played the video inline next to the PiP
+  window, and closing the window sent it back to the old, off-screen surface.
+  The new view now takes over the window and the surface it plays from: the
+  tile shows the PiP placeholder, and closing the window returns it to the
+  tile where it is now.
+
 ## [1.6.7] - 2026-10-15
 
 ### Fixed

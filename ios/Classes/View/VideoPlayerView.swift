@@ -102,6 +102,11 @@ import QuartzCore
     // until after didStopPictureInPicture completes
     var isPipRestoringUI: Bool = false
 
+    // Set on a view kept for its PiP window once a new view of its controller
+    // took over that window and the surface it plays from (see
+    // takeOverPipWindow): its deinit leaves that surface alone.
+    var handedOverPipWindow = false
+
     // Track if we've already registered remote command handlers
     // This prevents re-registering and clearing targets unnecessarily
     var hasRegisteredRemoteCommands: Bool = false
@@ -267,10 +272,23 @@ import QuartzCore
         // lazy property after super.init() (lazy vars can't be set earlier).
         var resolvedViewController: AVPlayerViewController?
 
+        // A disposed view of this controller whose PiP window is still open
+        // (a feed tile scrolled away and back). This view takes over that
+        // window and the surface it plays from: the tile shows the PiP
+        // placeholder instead of a second live picture, and the window
+        // returns to the tile where it is now.
+        var pipHost: VideoPlayerView?
+
         if let args = argsDict,
            let controllerIdValue = args["controllerId"] as? Int {
             controllerId = controllerIdValue
             isDartFullscreenView = isDartFullscreen
+
+            if !isDartFullscreen, !useTextureView,
+               let host = SharedPlayerManager.shared.viewKeptForPip(for: controllerIdValue),
+               !host.usesTextureView, host.usesLightView == useLightView {
+                pipHost = host
+            }
 
             if useLightView || useTextureView {
                 // Light views render through their own AVPlayerLayer (one per
@@ -303,6 +321,9 @@ import QuartzCore
                     // Attaching a view controller re-runs AVKit's media selection; keep Dart's subtitle choice.
                     SharedPlayerManager.shared.reapplyLegibleSelection(for: controllerIdValue)
                     npLog("✅ Created dedicated AVPlayerViewController for Dart fullscreen (controller ID: \(controllerIdValue))")
+                } else if let host = pipHost {
+                    resolvedViewController = host.playerViewController
+                    npLog("✅ Adopting the AVPlayerViewController of view \(host.viewId), whose PiP window is open (controller ID: \(controllerIdValue))")
                 } else {
                     if alreadyExisted {
                         // Second or later platform view for this controller (e.g. detail screen).
@@ -349,7 +370,7 @@ import QuartzCore
             // (which owns the texture registry) right after this init.
             // It follows player.currentItem on its own.
         } else if useLightView {
-            let light = PlayerLayerView()
+            let light = pipHost?.lightView ?? PlayerLayerView()
             light.playerLayer.player = player
             lightView = light
         } else {
@@ -543,6 +564,10 @@ import QuartzCore
         // one detector serves all views (iOS 11.0+).
         if #available(iOS 11.0, *) {
             SharedPlayerManager.shared.ensureRouteDetectionStarted()
+        }
+
+        if #available(iOS 14.0, *), let host = pipHost {
+            takeOverPipWindow(from: host)
         }
     }
 
@@ -1076,7 +1101,10 @@ import QuartzCore
         }
 
         // Always send pipStop event - either from this view or an alternative
-        if eventSink != nil {
+        // (but not when another view took over the still open PiP window)
+        if handedOverPipWindow {
+            npLog("ℹ️ PiP window was handed over to another view - no pipStop")
+        } else if eventSink != nil {
             // This view still has a listener, send from here
             sendEvent("pipStop", data: ["isPictureInPicture": false])
             npLog("✅ Sent pipStop event from disposing view \(viewId)")
@@ -1117,7 +1145,10 @@ import QuartzCore
                 npLog("🎬 View being disposed (primary: \(wasPrimaryView), autoEnabled: \(wasAutoEnabled), playing: \(isPlaying)) - transferring automatic PiP to another view")
 
                 // Disable automatic PiP on this view before unregistering
-                setAutomaticInlinePiP(false)
+                // (not on a surface another view took over)
+                if !handedOverPipWindow {
+                    setAutomaticInlinePiP(false)
+                }
 
                 // Unregister this view first so it won't be found
                 SharedPlayerManager.shared.unregisterVideoPlayerView(viewId: viewId)
@@ -1201,7 +1232,10 @@ import QuartzCore
 
         // Light views always detach their layer so a remaining surface (an
         // inline tile's layer, or a shared VC) resumes rendering deterministically.
-        lightView?.playerLayer.player = nil
+        // A layer another view took over with its PiP window stays bound.
+        if !handedOverPipWindow {
+            lightView?.playerLayer.player = nil
+        }
 
         // Texture resources (display link, video output, engine texture).
         textureRenderer?.shutdown()

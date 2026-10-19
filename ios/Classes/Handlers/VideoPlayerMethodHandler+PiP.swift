@@ -204,6 +204,40 @@ extension VideoPlayerView {
         }
     }
 
+    /// Takes over the open PiP window of [host], a disposed view of the same
+    /// controller kept for that window, whose display surface this view
+    /// adopted in init. A new view used to get a surface of its own: it showed
+    /// the video playing next to the window, and closing the window sent it
+    /// back to the old, off-screen surface. This view is now the window's
+    /// delegate, so it closes into this view; [host] is let go.
+    @available(iOS 14.0, *)
+    func takeOverPipWindow(from host: VideoPlayerView) {
+        npLog("🎬 View \(viewId) takes over the PiP window of disposed view \(host.viewId)")
+
+        // Manual PiP: the AVPictureInPictureController on the adopted layer.
+        // AVPlayerViewController PiP: init already made this view its delegate.
+        pipController = host.pipController
+        pipController?.delegate = self
+        isPipCurrentlyActive = true
+
+        // A manual PiP keeps AVPlayerViewController's own PiP off until the
+        // window closes (see handleEnterPictureInPicture); init re-applied it.
+        if pipController != nil, usesViewControllerDisplay {
+            playerViewController.allowsPictureInPicturePlayback = false
+        }
+
+        host.pipController = nil
+        host.isPipCurrentlyActive = false
+        host.handedOverPipWindow = true
+
+        // Next turn, once this view is fully set up: the host's deinit hands
+        // the remote commands to this view.
+        let hostViewId = host.viewId
+        DispatchQueue.main.async {
+            SharedPlayerManager.shared.releaseViewKeptForPip(hostViewId)
+        }
+    }
+
     /// Finds the AVPlayerLayer in the view hierarchy
     func findPlayerLayer() -> AVPlayerLayer? {
         // Texture views have no on-screen layer (the fix-layer is zero-sized

@@ -704,6 +704,15 @@ class SharedPlayerManager: NSObject {
         npLog("   → Keeping view \(view.viewId) alive while its PiP window is open")
     }
 
+    /// The view kept by [keepViewForPip] whose PiP window plays
+    /// [controllerId], unless that window is already closing.
+    func viewKeptForPip(for controllerId: Int) -> VideoPlayerView? {
+        assertMainThread()
+        return viewsKeptForPip.values.first {
+            $0.controllerId == controllerId && $0.isPipCurrentlyActive && !$0.isPipRestoringUI
+        }
+    }
+
     /// Releases a view kept by [keepViewForPip] once its PiP window closed.
     func releaseViewKeptForPip(_ viewId: Int64) {
         assertMainThread()
