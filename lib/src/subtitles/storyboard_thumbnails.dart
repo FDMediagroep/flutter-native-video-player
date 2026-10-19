@@ -146,6 +146,46 @@ class StoryboardThumbnails {
     required String videoBaseUrl,
     required Duration duration,
     double aspectRatio = 16 / 9,
+  }) => StoryboardThumbnails._bunny(
+    videoBaseUrl: videoBaseUrl,
+    query: '',
+    duration: duration,
+    aspectRatio: aspectRatio,
+  );
+
+  /// [StoryboardThumbnails.bunny] from the HLS URL you play, e.g.
+  /// `https://vz-….b-cdn.net/{video_id}/playlist.m3u8`: the sprites are
+  /// next to the playlist. A signed URL keeps its token, in the query
+  /// (`?token=…&expires=…`) or in the path (`/bcdn_token=…&expires=…&
+  /// token_path=…/{video_id}/playlist.m3u8`), so the sprites load when the
+  /// token covers the video's folder (Bunny's `token_path`). Returns null
+  /// when [playlistUrl] has no path to replace.
+  static StoryboardThumbnails? bunnyFromPlaylistUrl(
+    String playlistUrl, {
+    required Duration duration,
+    double aspectRatio = 16 / 9,
+  }) {
+    final queryStart = playlistUrl.indexOf('?');
+    final path = queryStart == -1
+        ? playlistUrl
+        : playlistUrl.substring(0, queryStart);
+    final query = queryStart == -1 ? '' : playlistUrl.substring(queryStart);
+    final lastSlash = path.lastIndexOf('/');
+    // Past the "https://" of a bare host there is nothing to replace.
+    if (lastSlash <= path.indexOf('//') + 1) return null;
+    return StoryboardThumbnails._bunny(
+      videoBaseUrl: path.substring(0, lastSlash),
+      query: query,
+      duration: duration,
+      aspectRatio: aspectRatio,
+    );
+  }
+
+  factory StoryboardThumbnails._bunny({
+    required String videoBaseUrl,
+    required String query,
+    required Duration duration,
+    required double aspectRatio,
   }) {
     assert(aspectRatio > 0);
     const framesPerSprite = 36;
@@ -159,7 +199,9 @@ class StoryboardThumbnails {
         ? videoBaseUrl.substring(0, videoBaseUrl.length - 1)
         : videoBaseUrl;
     return StoryboardThumbnails.fromUniformGrid(
-      spriteUrls: [for (var i = 0; i < sprites; i++) '$base/seek/_$i.jpg'],
+      spriteUrls: [
+        for (var i = 0; i < sprites; i++) '$base/seek/_$i.jpg$query',
+      ],
       frameInterval: interval,
       columns: 6,
       frameWidth: frameWidth,

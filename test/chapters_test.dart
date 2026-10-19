@@ -196,6 +196,250 @@ Outro
     });
   });
 
+  group('storyboard precache order', () {
+    test('imageUrlsAround: the sheet at the position first, then outward', () {
+      final storyboard = StoryboardThumbnails.fromUniformGrid(
+        spriteUrls: const ['s0', 's1', 's2', 's3', 's4'],
+        frameInterval: const Duration(seconds: 1),
+        columns: 2,
+        frameWidth: 10,
+        frameHeight: 10,
+        framesPerSprite: 4,
+      );
+      expect(storyboard.imageUrlsAround(const Duration(seconds: 9), limit: 3), [
+        's2',
+        's1', // frame 7 is nearer to frame 9 than frame 12
+        's3',
+      ]);
+      expect(storyboard.imageUrlsAround(Duration.zero, limit: 2), ['s0', 's1']);
+      expect(storyboard.imageUrlsAround(Duration.zero, limit: 0), isEmpty);
+    });
+  });
+
+  group('Bunny storyboard from the playlist URL', () {
+    test('keeps a query token', () {
+      final storyboard = StoryboardThumbnails.bunnyFromPlaylistUrl(
+        'https://vz-abc.b-cdn.net/guid/playlist.m3u8?token=t&expires=1',
+        duration: const Duration(minutes: 3),
+      )!;
+      expect(
+        storyboard.entries.first.url,
+        'https://vz-abc.b-cdn.net/guid/seek/_0.jpg?token=t&expires=1',
+      );
+      // 90 frames every 2 s, 36 per sheet: 3 sheets.
+      expect(storyboard.entries.map((e) => e.url).toSet(), hasLength(3));
+    });
+
+    test('keeps a path token', () {
+      final storyboard = StoryboardThumbnails.bunnyFromPlaylistUrl(
+        'https://vz-abc.b-cdn.net/bcdn_token=t&expires=1&token_path=%2Fguid%2F'
+        '/guid/playlist.m3u8',
+        duration: const Duration(seconds: 30),
+      )!;
+      expect(
+        storyboard.entries.first.url,
+        'https://vz-abc.b-cdn.net/bcdn_token=t&expires=1&token_path=%2Fguid%2F'
+        '/guid/seek/_0.jpg',
+      );
+    });
+
+    test('null without a path', () {
+      expect(
+        StoryboardThumbnails.bunnyFromPlaylistUrl(
+          'https://vz-abc.b-cdn.net',
+          duration: const Duration(seconds: 30),
+        ),
+        isNull,
+      );
+    });
+  });
+
+  group('NativeVideoPlayerProgressBar without a controller', () {
+    Widget host(Widget bar) => MaterialApp(
+      home: Align(
+        alignment: Alignment.topLeft,
+        child: Padding(
+          padding: const EdgeInsets.only(top: 300),
+          child: SizedBox(width: 400, child: bar),
+        ),
+      ),
+    );
+
+    Offset at(WidgetTester tester, double x) =>
+        tester.getTopLeft(find.byType(NativeVideoPlayerProgressBar)) +
+        Offset(x, 16);
+
+    Future<void> drag(WidgetTester tester, double from, double to) async {
+      final gesture = await tester.startGesture(at(tester, from));
+      await gesture.moveTo(at(tester, (from + to) / 2));
+      await gesture.moveTo(at(tester, to));
+      await tester.pump();
+      await gesture.up();
+      await tester.pump();
+    }
+
+    testWidgets('uses the values and onSeek it is given, with callbacks', (
+      tester,
+    ) async {
+      final seeks = <Duration>[];
+      final events = <String>[];
+      await tester.pumpWidget(
+        host(
+          NativeVideoPlayerProgressBar(
+            position: const Duration(seconds: 10),
+            duration: const Duration(seconds: 60),
+            chapters: _chapters,
+            onSeek: seeks.add,
+            hapticFeedback: false,
+            onScrubStart: (_) => events.add('start'),
+            onScrubEnd: (p) => events.add('end ${p.inSeconds}'),
+          ),
+        ),
+      );
+      await drag(tester, 100, 205);
+      expect(seeks, [const Duration(seconds: 30)], reason: 'snapped');
+      expect(events, ['start', 'end 30']);
+    });
+
+    testWidgets('showPreview: false shows no bubble', (tester) async {
+      await tester.pumpWidget(
+        host(
+          const NativeVideoPlayerProgressBar(
+            duration: Duration(seconds: 60),
+            chapters: _chapters,
+            showPreview: false,
+            onSeek: _ignoreSeek,
+          ),
+        ),
+      );
+      final gesture = await tester.startGesture(at(tester, 100));
+      await gesture.moveTo(at(tester, 150));
+      await gesture.moveTo(at(tester, 205));
+      await tester.pump();
+      expect(find.text('Part two'), findsNothing);
+      expect(find.text('0:30'), findsNothing);
+      await gesture.up();
+      await tester.pump();
+    });
+
+    testWidgets('preview parts can be switched off; a custom builder', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        host(
+          NativeVideoPlayerProgressBar(
+            duration: const Duration(seconds: 60),
+            chapters: _chapters,
+            onSeek: _ignoreSeek,
+            previewStyle: const NativeVideoPlayerScrubPreviewStyle(
+              showChapterTitle: false,
+              backgroundColor: Colors.black,
+              padding: EdgeInsets.all(8),
+              arrowSize: Size(8, 6),
+            ),
+          ),
+        ),
+      );
+      final gesture = await tester.startGesture(at(tester, 100));
+      await gesture.moveTo(at(tester, 150));
+      await gesture.moveTo(at(tester, 205));
+      await tester.pump();
+      expect(find.text('Part two'), findsNothing);
+      expect(find.text('0:30'), findsOneWidget);
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      await tester.pumpWidget(
+        host(
+          NativeVideoPlayerProgressBar(
+            duration: const Duration(seconds: 60),
+            chapters: _chapters,
+            onSeek: _ignoreSeek,
+            previewBuilder: (context, details) =>
+                Text('custom ${details.chapter?.title} ${details.snapped}'),
+          ),
+        ),
+      );
+      final second = await tester.startGesture(at(tester, 100));
+      await second.moveTo(at(tester, 150));
+      await second.moveTo(at(tester, 205));
+      await tester.pump();
+      expect(find.text('custom Part two true'), findsOneWidget);
+      await second.up();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('a storyboard image that fails to load does not throw', (
+      tester,
+    ) async {
+      final storyboard = StoryboardThumbnails.fromUniformGrid(
+        spriteUrls: const ['assets/does-not-exist.jpg'],
+        frameInterval: const Duration(seconds: 10),
+        columns: 10,
+        frameWidth: 160,
+        frameHeight: 90,
+        framesPerSprite: 60,
+      );
+      await tester.pumpWidget(
+        host(
+          NativeVideoPlayerProgressBar(
+            duration: const Duration(seconds: 60),
+            chapters: _chapters,
+            storyboard: storyboard,
+            storyboardHeaders: const {'Referer': 'https://example.com'},
+            onSeek: _ignoreSeek,
+          ),
+        ),
+      );
+      final gesture = await tester.startGesture(at(tester, 100));
+      await gesture.moveTo(at(tester, 150));
+      await gesture.moveTo(at(tester, 205));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      // The frame is gone; title and time still show.
+      expect(find.byType(Image), findsOneWidget);
+      expect(find.text('Part two'), findsOneWidget);
+      expect(find.text('0:30'), findsOneWidget);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a custom image provider builder receives the headers', (
+      tester,
+    ) async {
+      final requested = <(String, Map<String, String>?)>[];
+      final storyboard = StoryboardThumbnails.fromUniformGrid(
+        spriteUrls: const ['https://cdn.example.com/seek/_0.jpg'],
+        frameInterval: const Duration(seconds: 10),
+        columns: 10,
+        frameWidth: 160,
+        frameHeight: 90,
+        framesPerSprite: 60,
+      );
+      await tester.pumpWidget(
+        host(
+          NativeVideoPlayerProgressBar(
+            duration: const Duration(seconds: 60),
+            storyboard: storyboard,
+            storyboardHeaders: const {'Referer': 'https://huddle.example'},
+            storyboardImageProvider: (url, headers) {
+              requested.add((url, headers));
+              return const AssetImage('assets/does-not-exist.jpg');
+            },
+            onSeek: _ignoreSeek,
+          ),
+        ),
+      );
+      // Precached around the start before any drag.
+      await tester.pumpAndSettle();
+      expect(requested, isNotEmpty);
+      expect(requested.first.$1, 'https://cdn.example.com/seek/_0.jpg');
+      expect(requested.first.$2, {'Referer': 'https://huddle.example'});
+      expect(tester.takeException(), isNull);
+    });
+  });
+
   group('controller', () {
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
@@ -488,6 +732,34 @@ Outro
         expect(haptics, isEmpty);
       });
 
+      testWidgets('keeps the overlay up while scrubbing, then lets go', (
+        tester,
+      ) async {
+        await pumpBar(tester);
+        final locks = <bool>[];
+        final sub = controller.isOverlayLockedStream.listen(locks.add);
+        final gesture = await tester.startGesture(at(tester, 100));
+        await gesture.moveTo(at(tester, 150));
+        await tester.pump();
+        expect(controller.isOverlayLocked, isTrue);
+        await gesture.up();
+        await tester.pump();
+        expect(controller.isOverlayLocked, isFalse);
+        expect(locks, [true, false]);
+
+        // The app's own lock survives a scrub.
+        controller.lockOverlay();
+        final again = await tester.startGesture(at(tester, 100));
+        await again.moveTo(at(tester, 150));
+        await again.up();
+        await tester.pump();
+        expect(controller.isOverlayLocked, isTrue);
+        controller.unlockOverlay();
+        expect(controller.isOverlayLocked, isFalse);
+        unawaited(sub.cancel());
+        await tester.pump(const Duration(seconds: 2));
+      });
+
       testWidgets('tap seeks', (tester) async {
         await pumpBar(tester);
         await tester.tapAt(at(tester, 100));
@@ -509,3 +781,5 @@ Outro
     });
   });
 }
+
+void _ignoreSeek(Duration _) {}

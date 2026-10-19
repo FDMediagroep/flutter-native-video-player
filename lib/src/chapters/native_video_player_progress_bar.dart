@@ -155,6 +155,7 @@ class NativeVideoPlayerProgressBar extends StatefulWidget {
     this.hapticFeedback = true,
     this.showPreview = true,
     this.showBuffered = true,
+    this.holdOverlayWhileScrubbing = true,
     this.style = const NativeVideoPlayerProgressBarStyle(),
     this.previewStyle = const NativeVideoPlayerScrubPreviewStyle(),
     this.previewBuilder,
@@ -218,6 +219,11 @@ class NativeVideoPlayerProgressBar extends StatefulWidget {
 
   /// Whether to draw the buffered range (never for live).
   final bool showBuffered;
+
+  /// Whether the player's overlay stays up while the viewer scrubs (see
+  /// [NativeVideoPlayerController.holdOverlay]); its hide timer starts
+  /// over after the release. Needs [controller].
+  final bool holdOverlayWhileScrubbing;
 
   final NativeVideoPlayerProgressBarStyle style;
   final NativeVideoPlayerScrubPreviewStyle previewStyle;
@@ -286,6 +292,19 @@ class _NativeVideoPlayerProgressBarState
   /// The chapter start the drag is snapped to, for the haptic tick.
   Duration? _snappedTo;
 
+  /// Releases the controller's overlay hold taken while scrubbing.
+  VoidCallback? _releaseOverlay;
+
+  void _holdOverlay() {
+    if (!widget.holdOverlayWhileScrubbing) return;
+    _releaseOverlay ??= _c?.holdOverlay();
+  }
+
+  void _releaseOverlayHold() {
+    _releaseOverlay?.call();
+    _releaseOverlay = null;
+  }
+
   /// Mouse x while hovering (desktop/web).
   double? _hoverX;
 
@@ -332,6 +351,7 @@ class _NativeVideoPlayerProgressBarState
   void didUpdateWidget(NativeVideoPlayerProgressBar oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
+      _releaseOverlayHold();
       _unlisten();
       _listen();
     }
@@ -346,6 +366,7 @@ class _NativeVideoPlayerProgressBarState
 
   @override
   void dispose() {
+    _releaseOverlayHold();
     _unlisten();
     _settleTimer?.cancel();
     _collapseTimer?.cancel();
@@ -425,6 +446,7 @@ class _NativeVideoPlayerProgressBarState
       _dragging = true;
       _scrub = position;
     });
+    _holdOverlay();
     _expand();
     widget.onScrubStart?.call(position);
   }
@@ -447,6 +469,7 @@ class _NativeVideoPlayerProgressBarState
     final target = _scrub!;
     setState(() => _dragging = false);
     _snappedTo = null;
+    _releaseOverlayHold();
     _collapse();
     widget.onScrubEnd?.call(target);
     final seek = widget.onSeek ?? _c?.seekTo;
@@ -471,6 +494,7 @@ class _NativeVideoPlayerProgressBarState
       _scrub = null;
     });
     _snappedTo = null;
+    _releaseOverlayHold();
     _collapse();
   }
 

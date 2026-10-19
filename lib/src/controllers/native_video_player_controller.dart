@@ -271,8 +271,41 @@ class NativeVideoPlayerController {
   /// Whether we have a custom overlay (determines if we use Dart fullscreen and hide native controls)
   bool get _hasCustomOverlay => _overlayBuilder != null && !_hideOverlayForPip;
 
-  /// Returns whether the overlay is currently locked (always visible)
-  bool get isOverlayLocked => _isOverlayLocked;
+  /// Returns whether the overlay is currently locked (always visible), by
+  /// [lockOverlay] or a [holdOverlay] that has not been released.
+  bool get isOverlayLocked => _isOverlayLocked || _overlayHolds > 0;
+
+  /// Open [holdOverlay]s.
+  int _overlayHolds = 0;
+
+  /// Emits [isOverlayLocked] when it changed from [wasLocked].
+  void _emitOverlayLock(bool wasLocked) {
+    final locked = isOverlayLocked;
+    if (locked != wasLocked && !_isOverlayLockedController.isClosed) {
+      _isOverlayLockedController.add(locked);
+    }
+  }
+
+  /// Keeps the custom overlay visible (no auto-hide, no tap-to-hide) until
+  /// the returned callback is called; the hide timer then starts over.
+  ///
+  /// Unlike [lockOverlay] this is counted and leaves your own lock alone,
+  /// so a widget can hold the overlay for as long as it is being used.
+  /// [NativeVideoPlayerProgressBar] does this while the viewer scrubs.
+  /// Calling the release more than once does nothing.
+  VoidCallback holdOverlay() {
+    final wasLocked = isOverlayLocked;
+    _overlayHolds++;
+    _emitOverlayLock(wasLocked);
+    var released = false;
+    return () {
+      if (released || _isDisposed) return;
+      released = true;
+      final wasLocked = isOverlayLocked;
+      _overlayHolds--;
+      _emitOverlayLock(wasLocked);
+    };
+  }
 
   /// Stream controller for overlay lock state changes
   final StreamController<bool> _isOverlayLockedController =
@@ -959,7 +992,7 @@ class NativeVideoPlayerController {
 
     // Emit to overlay lock state listeners
     if (!_isOverlayLockedController.isClosed) {
-      _isOverlayLockedController.add(_isOverlayLocked);
+      _isOverlayLockedController.add(isOverlayLocked);
     }
   }
 
@@ -3279,10 +3312,9 @@ class NativeVideoPlayerController {
   ///
   /// To unlock the overlay and restore normal behavior, call [unlockOverlay].
   void lockOverlay() {
+    final wasLocked = isOverlayLocked;
     _isOverlayLocked = true;
-    if (!_isOverlayLockedController.isClosed) {
-      _isOverlayLockedController.add(true);
-    }
+    _emitOverlayLock(wasLocked);
   }
 
   /// Unlocks the custom overlay to allow it to be dismissed
@@ -3298,10 +3330,9 @@ class NativeVideoPlayerController {
   ///
   /// To lock the overlay again and keep it always visible, call [lockOverlay].
   void unlockOverlay() {
+    final wasLocked = isOverlayLocked;
     _isOverlayLocked = false;
-    if (!_isOverlayLockedController.isClosed) {
-      _isOverlayLockedController.add(false);
-    }
+    _emitOverlayLock(wasLocked);
   }
 
   /// Releases Flutter-side resources while keeping the native player alive
