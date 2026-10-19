@@ -57,33 +57,22 @@ class VideoPlayerObserver(
         var position: Long
         var duration: Long
 
-        // Check if this is a live stream (not just dynamic, but actually non-seekable live)
-        val timeline = player.currentTimeline
-        val window = Timeline.Window()
+        // Live streams report times relative to the seekable (DVR) window,
+        // which is how Media3 reports a live window's position already
+        val isLive = player.isCurrentMediaItemLive
+        position = player.currentPosition
+        duration = player.duration
 
-        val isLiveStream = !timeline.isEmpty &&
-            timeline.getWindow(player.currentMediaItemIndex, window).isDynamic &&
-            !window.isSeekable
-
-        if (isLiveStream) {
-            // For HLS live streams, use the seekable window to calculate relative position
-            // Get the window information
-            timeline.getWindow(player.currentMediaItemIndex, window)
-
-            // Duration is the seekable window size
-            duration = window.durationMs
-
-            // Position is relative to the seekable window start
-            // windowStartTimeMs gives us the absolute start time of the window
-            position = player.currentPosition - window.windowStartTimeMs
+        if (isLive) {
+            val timeline = player.currentTimeline
+            if (duration == C.TIME_UNSET && !timeline.isEmpty) {
+                // Duration is the window size
+                duration = timeline.getWindow(player.currentMediaItemIndex, Timeline.Window()).durationMs
+            }
 
             // Clamp position to valid range
             if (position < 0) position = 0
-            if (position > duration) position = duration
-        } else {
-            // Regular VOD content - use direct position and duration
-            position = player.currentPosition
-            duration = player.duration
+            if (duration > 0 && position > duration) position = duration
         }
 
         // Get buffered position
@@ -97,7 +86,8 @@ class VideoPlayerObserver(
                 "position" to position.toInt(),
                 "duration" to duration.toInt(),
                 "bufferedPosition" to bufferedPosition,
-                "isBuffering" to isBuffering
+                "isBuffering" to isBuffering,
+                "isLive" to isLive
             ))
         }
     }

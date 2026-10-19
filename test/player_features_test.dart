@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:better_native_video_player/better_native_video_player.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -417,6 +419,60 @@ img.jpg#xywh=oops,0,160
       await tester.pump();
       expect(calls.where((c) => c.method == 'pause'), isEmpty);
       expect(calls.where((c) => c.method == 'play'), isEmpty);
+    });
+  });
+
+  group('live streams', () {
+    Future<void> sendLive(WidgetTester tester, {required int positionMs}) =>
+        sendEvent(tester, {
+          'event': 'timeUpdate',
+          'position': positionMs,
+          'duration': 120000,
+          'bufferedPosition': positionMs,
+          'isBuffering': false,
+          'isLive': true,
+        });
+
+    testWidgets('timeUpdate isLive drives isLive, its stream and the offset', (
+      tester,
+    ) async {
+      await attachView(tester);
+      final emitted = <bool>[];
+      final sub = controller.isLiveStream.listen(emitted.add);
+
+      expect(controller.isLive, isFalse);
+      await sendLive(tester, positionMs: 90000);
+
+      expect(controller.isLive, isTrue);
+      expect(controller.duration, const Duration(minutes: 2));
+      expect(controller.liveEdgeOffset, const Duration(seconds: 30));
+      expect(emitted, [true]);
+      // Not awaited: the cancel future never completes in the fake-async
+      // zone, which would hang the test.
+      unawaited(sub.cancel());
+    });
+
+    testWidgets('a VOD update without the flag keeps it, a new load clears '
+        'it', (tester) async {
+      await attachView(tester);
+      await sendLive(tester, positionMs: 1000);
+      // Older native builds send no isLive: keep the last known value.
+      await sendPosition(tester, 2000);
+      expect(controller.isLive, isTrue);
+
+      await controller.load(url: 'https://example.com/vod.mp4', force: true);
+      expect(controller.isLive, isFalse);
+      expect(controller.liveEdgeOffset, Duration.zero);
+    });
+
+    testWidgets('seekToLiveEdge calls the platform for the primary view', (
+      tester,
+    ) async {
+      await attachView(tester);
+      await controller.seekToLiveEdge();
+
+      final call = calls.lastWhere((c) => c.method == 'seekToLiveEdge');
+      expect((call.arguments as Map)['viewId'], viewId);
     });
   });
 }

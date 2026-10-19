@@ -21,6 +21,7 @@ export 'src/models/native_video_player_audio_track.dart';
 export 'src/models/native_video_player_download.dart';
 export 'src/models/native_video_player_media_info.dart';
 export 'src/models/native_video_player_playback_range.dart';
+export 'src/models/native_video_player_poster.dart';
 export 'src/models/native_video_player_quality.dart';
 export 'src/models/native_video_player_sidecar_subtitle.dart';
 export 'src/models/native_video_player_state.dart';

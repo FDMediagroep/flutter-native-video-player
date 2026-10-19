@@ -449,6 +449,8 @@ extension _ControllerEventPlumbing on NativeVideoPlayerController {
               (controlEvent.data!['bufferedPosition'] as num?)?.toInt() ?? 0;
           final bool isBuffering =
               (controlEvent.data!['isBuffering'] as bool?) ?? false;
+          // Older native builds don't send it; keep the last known value.
+          final bool? isLive = controlEvent.data!['isLive'] as bool?;
 
           // Handle buffering state with 400ms debounce
           _handleBufferingStateChange(isBuffering);
@@ -469,6 +471,7 @@ extension _ControllerEventPlumbing on NativeVideoPlayerController {
               duration: newDuration,
               bufferedPosition: Duration(milliseconds: bufferedPosition),
               controlState: controlEvent.state,
+              isLive: isLive,
             ),
           );
         }

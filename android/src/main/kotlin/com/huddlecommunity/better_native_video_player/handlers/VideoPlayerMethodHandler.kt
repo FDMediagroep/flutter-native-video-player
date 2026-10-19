@@ -228,6 +228,7 @@ class VideoPlayerMethodHandler(
             "play" -> handlePlay(result)
             "pause" -> handlePause(result)
             "seekTo" -> handleSeekTo(call, result)
+            "seekToLiveEdge" -> handleSeekToLiveEdge(result)
             "setVolume" -> handleSetVolume(call, result)
             "setSpeed" -> handleSetSpeed(call, result)
             "setLooping" -> handleSetLooping(call, result)
@@ -486,6 +487,18 @@ class VideoPlayerMethodHandler(
         if (milliseconds != null) {
             player.seekTo(milliseconds.toLong())
             eventHandler.sendEvent("seek", mapOf("position" to milliseconds))
+        }
+        result.success(null)
+    }
+
+    /**
+     * Seeks a live stream to its live edge (the default position Media3
+     * keeps at the target live offset). A no-op for VOD.
+     */
+    private fun handleSeekToLiveEdge(result: MethodChannel.Result) {
+        if (player.isCurrentMediaItemLive) {
+            player.seekToDefaultPosition()
+            eventHandler.sendEvent("seek", mapOf("position" to player.duration.coerceAtLeast(0).toInt()))
         }
         result.success(null)
     }

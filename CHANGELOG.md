@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Posters and preview animations.** `NativeVideoPlayer(poster:)` shows a
+  custom thumbnail over the video until it plays, so a loading player is
+  never a black box. After `animationDelay` (default 3 s) of looking at the
+  unplayed video, an animated preview (GIF / animated WebP, e.g. highlights)
+  fades in over it; `animationDuration` and `repeatAnimation` cycle it back
+  to the still. A duration badge ("9:56", "LIVE") shows by default, from
+  `duration:` until the player reports its own. Fit, alignment, fade,
+  background, when it hides (`onPlay` / `onLoaded`), showing it again at the
+  end (`showOnCompleted`), the badge (`badgeBuilder`) and anything on top
+  (`overlayBuilder`, with the loading state) are all configurable.
+- **Bunny Stream helpers.** `NativeVideoPlayerPoster.bunny(videoBaseUrl)`
+  uses the video's `thumbnail.jpg` and `preview.webp` (or `.gif`), and
+  `StoryboardThumbnails.bunny(videoBaseUrl:, duration:)` its `seek/_N.jpg`
+  scrub sprites (6×6 grids of 300 px frames, 2 s apart).
+- **Live streams.** `isLive` / `isLiveStream` tell a live HLS stream from
+  VOD, `seekToLiveEdge()` jumps back to live, and `liveEdgeOffset` says how
+  far behind live playback is. For a live stream `duration` is the DVR
+  window and `currentPosition` and `seekTo` work within it, so a regular
+  scrubber works as a DVR scrubber.
 - **iOS: `onPictureInPictureRestore`, to open the video's screen from the
   PiP window.** Called when the user taps the window's "back to app" button
   (not for `exitPictureInPicture()`, `dispose()` or the window's X). The
@@ -55,6 +74,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pauses and does not call it.
 
 ### Fixed
+- **iOS: seeking in a live stream jumped to the start of its DVR window.**
+  Live positions are reported relative to the window, but `seekTo` took them
+  as absolute stream times. The buffered position was absolute too.
+- **Android: a live stream without a seekable window reported position 0.**
+  The position was offset by the window's wall-clock start time.
 - **iOS: a tile scrolled back while its PiP window is open plays the video
   next to the window.** Scrolling a feed tile far enough disposes its platform
   view; since 1.6.5 the native view is kept while its window is open, and

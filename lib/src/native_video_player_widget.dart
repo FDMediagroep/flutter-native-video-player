@@ -10,10 +10,12 @@ import 'config/native_video_player_config.dart';
 import 'controllers/native_video_player_controller.dart';
 import 'enums/native_video_player_event.dart';
 import 'fullscreen/fullscreen_hero_transition.dart';
+import 'models/native_video_player_poster.dart';
 import 'models/native_video_player_subtitle_style.dart';
 import 'models/native_video_player_video_size.dart';
 import 'platform/video_player_method_channel.dart';
 import 'platform/view_visibility.dart';
+import 'poster/poster_layer.dart';
 import 'subtitles/subtitle_overlay.dart';
 
 /// A native video player widget that wraps platform-specific video players
@@ -36,6 +38,7 @@ class NativeVideoPlayer extends StatefulWidget {
     this.overlayFadeDuration = const Duration(milliseconds: 300),
     this.isFullscreenContext = false,
     this.subtitleStyle = const NativeVideoPlayerSubtitleStyle(),
+    this.poster,
     super.key,
   });
 
@@ -45,6 +48,10 @@ class NativeVideoPlayer extends StatefulWidget {
   /// the plugin's Flutter subtitle layer. Rebuild with a new style to change
   /// it at runtime. Embedded native tracks use system caption settings.
   final NativeVideoPlayerSubtitleStyle subtitleStyle;
+
+  /// A custom thumbnail over the video until it plays, with an optional
+  /// preview animation after a delay. See [NativeVideoPlayerPoster].
+  final NativeVideoPlayerPoster? poster;
 
   /// Optional overlay widget builder that renders on top of the video player.
   /// The builder receives the BuildContext and controller to build custom controls.
@@ -927,14 +934,27 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
 
     // Without a custom controls overlay, the stack is just the platform view
     // plus the subtitle layer
+    // The poster covers the video (not the controls) until it plays
+    final Widget? posterLayer = widget.poster == null
+        ? null
+        : Positioned.fill(
+            child: whileVideoIn(
+              PosterLayer(
+                poster: widget.poster!,
+                controller: widget.controller,
+              ),
+            ),
+          );
+
     if (widget.overlayBuilder == null) {
-      content = Stack(children: [platformView, subtitleLayer]);
+      content = Stack(children: [platformView, ?posterLayer, subtitleLayer]);
     } else {
       // Wrap platform view with animated overlay in a Stack
       content = Stack(
         children: [
           // Platform view
           platformView,
+          ?posterLayer,
           // Subtitles render below the controls overlay
           subtitleLayer,
           // Transparent tap layer when overlay is hidden

@@ -21,6 +21,7 @@ class NativeVideoPlayerState {
     this.isAirplayConnected = false,
     this.isAirplayConnecting = false,
     this.airPlayDeviceName,
+    this.isLive = false,
   });
 
   /// Whether the video is currently in fullscreen mode
@@ -71,6 +72,12 @@ class NativeVideoPlayerState {
   /// The name of the currently connected AirPlay device, or null if not connected
   final String? airPlayDeviceName;
 
+  /// Whether the loaded source is a live stream. For live streams
+  /// [duration] is the seekable (DVR) window and [currentPosition] is
+  /// measured from its start, so `duration - currentPosition` is how far
+  /// playback is behind the live edge.
+  final bool isLive;
+
   /// Creates a copy of this state with the given fields replaced with new values
   NativeVideoPlayerState copyWith({
     bool? isFullScreen,
@@ -89,6 +96,7 @@ class NativeVideoPlayerState {
     bool? isAirplayConnected,
     bool? isAirplayConnecting,
     String? airPlayDeviceName,
+    bool? isLive,
   }) {
     return NativeVideoPlayerState(
       isFullScreen: isFullScreen ?? this.isFullScreen,
@@ -107,6 +115,7 @@ class NativeVideoPlayerState {
       isAirplayConnected: isAirplayConnected ?? this.isAirplayConnected,
       isAirplayConnecting: isAirplayConnecting ?? this.isAirplayConnecting,
       airPlayDeviceName: airPlayDeviceName ?? this.airPlayDeviceName,
+      isLive: isLive ?? this.isLive,
     );
   }
 
@@ -130,7 +139,8 @@ class NativeVideoPlayerState {
         other.isAirplayAvailable == isAirplayAvailable &&
         other.isAirplayConnected == isAirplayConnected &&
         other.isAirplayConnecting == isAirplayConnecting &&
-        other.airPlayDeviceName == airPlayDeviceName;
+        other.airPlayDeviceName == airPlayDeviceName &&
+        other.isLive == isLive;
   }
 
   @override
@@ -152,6 +162,7 @@ class NativeVideoPlayerState {
       isAirplayConnected,
       isAirplayConnecting,
       airPlayDeviceName,
+      isLive,
     );
   }
 }

@@ -255,6 +255,18 @@ class VideoPlayerMethodChannel {
     }
   }
 
+  /// Seeks a live stream to its live edge
+  Future<void> seekToLiveEdge() async {
+    try {
+      await _methodChannel.invokeMethod<void>(
+        'seekToLiveEdge',
+        <String, Object>{'viewId': primaryPlatformViewId},
+      );
+    } catch (e) {
+      debugPrint('Error calling seekToLiveEdge: $e');
+    }
+  }
+
   /// Sets the volume
   Future<void> setVolume(double volume) async {
     try {

@@ -846,6 +846,8 @@ import QuartzCore
             handlePause(result: result)
         case "seekTo":
             handleSeekTo(call: call, result: result)
+        case "seekToLiveEdge":
+            handleSeekToLiveEdge(result: result)
         case "setVolume":
             handleSetVolume(call: call, result: result)
         case "setSpeed":

@@ -133,6 +133,42 @@ class StoryboardThumbnails {
     return StoryboardThumbnails._(entries);
   }
 
+  /// The seek sprites Bunny Stream generates for a video:
+  /// `{videoBaseUrl}/seek/_0.jpg`, `_1.jpg`, ... — 6×6 grids of 300px-wide
+  /// frames, one frame every 2 seconds (every second for videos shorter
+  /// than 10 seconds).
+  ///
+  /// [videoBaseUrl] is the video's folder on the pull zone,
+  /// `https://{pull_zone}.b-cdn.net/{video_id}`. [duration] is the video's
+  /// length (Bunny's API `length`, or the player's `duration`) and
+  /// [aspectRatio] its width / height, which sets the frame height.
+  factory StoryboardThumbnails.bunny({
+    required String videoBaseUrl,
+    required Duration duration,
+    double aspectRatio = 16 / 9,
+  }) {
+    assert(aspectRatio > 0);
+    const framesPerSprite = 36;
+    const frameWidth = 300.0;
+    final interval = duration < const Duration(seconds: 10)
+        ? const Duration(seconds: 1)
+        : const Duration(seconds: 2);
+    final frames = (duration.inMilliseconds / interval.inMilliseconds).ceil();
+    final sprites = (frames / framesPerSprite).ceil();
+    final base = videoBaseUrl.endsWith('/')
+        ? videoBaseUrl.substring(0, videoBaseUrl.length - 1)
+        : videoBaseUrl;
+    return StoryboardThumbnails.fromUniformGrid(
+      spriteUrls: [for (var i = 0; i < sprites; i++) '$base/seek/_$i.jpg'],
+      frameInterval: interval,
+      columns: 6,
+      frameWidth: frameWidth,
+      frameHeight: (frameWidth / aspectRatio).floorToDouble(),
+      framesPerSprite: framesPerSprite,
+      totalFrames: frames,
+    );
+  }
+
   /// Downloads and parses a storyboard VTT from [url].
   static Future<StoryboardThumbnails> fromUrl(String url) async {
     final content = await SubtitleLoader.loadUrl(url);

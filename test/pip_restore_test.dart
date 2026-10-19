@@ -75,9 +75,7 @@ void main() {
       calls++;
       // Not awaited: a push completes when the route is popped.
       navigator.currentState!.push(
-        MaterialPageRoute<void>(
-          builder: (_) => Scaffold(body: player(2)),
-        ),
+        MaterialPageRoute<void>(builder: (_) => Scaffold(body: player(2))),
       );
     });
 

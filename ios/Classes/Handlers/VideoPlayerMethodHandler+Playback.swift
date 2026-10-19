@@ -51,8 +51,13 @@ extension VideoPlayerView {
     func handleSeekTo(call: FlutterMethodCall, result: @escaping FlutterResult) {
         if let args = call.arguments as? [String: Any],
            let milliseconds = args["milliseconds"] as? Int {
-            let seconds = Double(milliseconds) / 1000.0
-            player?.seek(to: CMTime(seconds: seconds, preferredTimescale: 1000)) { _ in
+            var target = CMTime(value: CMTimeValue(milliseconds), timescale: 1000)
+            // Live positions are relative to the seekable (DVR) window, the
+            // way timeUpdate reports them.
+            if let item = player?.currentItem, let window = liveSeekableWindow(of: item) {
+                target = CMTimeAdd(window.start, target)
+            }
+            player?.seek(to: target) { _ in
                 // Texture views must render the seeked frame even while
                 // paused (the engine shows the last copied buffer otherwise)
                 self.textureRenderer?.expectFrame()
@@ -61,6 +66,33 @@ extension VideoPlayerView {
             }
         }
         result(nil)
+    }
+
+    /// Seeks a live stream to the end of its seekable window (the live
+    /// edge). A no-op for VOD.
+    func handleSeekToLiveEdge(result: @escaping FlutterResult) {
+        guard let item = player?.currentItem, let window = liveSeekableWindow(of: item) else {
+            result(nil)
+            return
+        }
+        let windowMs = Int(CMTimeGetSeconds(CMTimeSubtract(window.end, window.start)) * 1000)
+        player?.seek(to: window.end) { _ in
+            self.textureRenderer?.expectFrame()
+            self.sendEvent("seek", data: ["position": windowMs])
+            self.updateNowPlayingPlaybackTime()
+        }
+        result(nil)
+    }
+
+    /// The seekable (DVR) window of a live item, or nil for VOD and for a
+    /// live item that has no seekable range yet.
+    func liveSeekableWindow(of item: AVPlayerItem) -> (start: CMTime, end: CMTime)? {
+        guard item.duration.isIndefinite,
+              let first = item.seekableTimeRanges.first?.timeRangeValue,
+              let last = item.seekableTimeRanges.last?.timeRangeValue else {
+            return nil
+        }
+        return (first.start, CMTimeRangeGetEnd(last))
     }
 
     func handleSetVolume(call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -177,19 +209,17 @@ extension VideoPlayerView {
 
             // For HLS live streams (indefinite duration), use seekableTimeRanges to get duration
             // Regular VOD content (including VOD HLS) uses the item's duration
-            if currentItem.duration.isIndefinite {
+            let isLive = currentItem.duration.isIndefinite
+            // Live times are reported relative to the seekable window start
+            var windowStartSeconds = 0.0
+            if isLive {
                 // Live stream - use seekable ranges
-                let seekableRanges = currentItem.seekableTimeRanges
-                if !seekableRanges.isEmpty {
-                    // HLS live stream - calculate duration from seekable range
-                    let firstRange = seekableRanges.first!.timeRangeValue
-                    let lastRange = seekableRanges.last!.timeRangeValue
-
-                    let rangeStart = firstRange.start
-                    let rangeEnd = CMTimeAdd(lastRange.start, lastRange.duration)
+                if let window = self.liveSeekableWindow(of: currentItem) {
+                    let rangeStart = window.start
+                    windowStartSeconds = CMTimeGetSeconds(rangeStart)
 
                     // Duration is the full seekable window
-                    durationSeconds = CMTimeGetSeconds(CMTimeSubtract(rangeEnd, rangeStart))
+                    durationSeconds = CMTimeGetSeconds(CMTimeSubtract(window.end, rangeStart))
 
                     // Position is relative to the start of the seekable window
                     positionSeconds = CMTimeGetSeconds(CMTimeSubtract(currentTime, rangeStart))
@@ -214,7 +244,7 @@ extension VideoPlayerView {
                 // Get the most recent buffered range
                 let bufferedRange = loadedRanges.last!.timeRangeValue
                 let bufferedEnd = CMTimeAdd(bufferedRange.start, bufferedRange.duration)
-                bufferedSeconds = CMTimeGetSeconds(bufferedEnd)
+                bufferedSeconds = max(0, CMTimeGetSeconds(bufferedEnd) - windowStartSeconds)
             }
 
             // Check if currently buffering
@@ -231,7 +261,8 @@ extension VideoPlayerView {
                     "position": position,
                     "duration": totalDuration,
                     "bufferedPosition": bufferedPosition,
-                    "isBuffering": isBuffering
+                    "isBuffering": isBuffering,
+                    "isLive": isLive
                 ])
             }
         }

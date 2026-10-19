@@ -22,10 +22,7 @@ void main() {
     await tester.pumpWidget(buildSubject(onDismissed: () => dismissed = true));
 
     // Default test surface is 800x600, threshold is 15% of the height (90px).
-    await tester.drag(
-      find.byType(SwipeDownDismissible),
-      const Offset(0, 200),
-    );
+    await tester.drag(find.byType(SwipeDownDismissible), const Offset(0, 200));
     await tester.pumpAndSettle();
 
     expect(dismissed, isTrue);
@@ -36,10 +33,7 @@ void main() {
     await tester.pumpWidget(buildSubject(onDismissed: () => dismissed = true));
     final restingPosition = tester.getTopLeft(find.text('content'));
 
-    await tester.drag(
-      find.byType(SwipeDownDismissible),
-      const Offset(0, 40),
-    );
+    await tester.drag(find.byType(SwipeDownDismissible), const Offset(0, 40));
     await tester.pumpAndSettle();
 
     expect(dismissed, isFalse);
@@ -55,10 +49,7 @@ void main() {
     await tester.pumpWidget(buildSubject(onDismissed: () => dismissed = true));
     final restingPosition = tester.getTopLeft(find.text('content'));
 
-    await tester.drag(
-      find.byType(SwipeDownDismissible),
-      const Offset(0, -200),
-    );
+    await tester.drag(find.byType(SwipeDownDismissible), const Offset(0, -200));
     await tester.pumpAndSettle();
 
     expect(dismissed, isFalse);

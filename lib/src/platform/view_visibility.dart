@@ -47,9 +47,11 @@ class ViewVisibility {
     if (call.method != 'isViewFullyVisible') {
       throw MissingPluginException();
     }
-    final int? viewId = (call.arguments as Map<Object?, Object?>?)?['viewId']
-        as int?;
-    final BuildContext? context = viewId == null ? null : _views[viewId]?.context;
+    final int? viewId =
+        (call.arguments as Map<Object?, Object?>?)?['viewId'] as int?;
+    final BuildContext? context = viewId == null
+        ? null
+        : _views[viewId]?.context;
     if (context == null || !context.mounted) {
       return false;
     }

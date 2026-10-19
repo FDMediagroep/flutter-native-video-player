@@ -472,6 +472,8 @@ class NativeVideoPlayerController {
 
   final StreamController<bool> _isFullscreenController =
       StreamController<bool>.broadcast();
+  final StreamController<bool> _isLiveController =
+      StreamController<bool>.broadcast();
   final StreamController<NativeVideoPlayerQuality> _qualityChangedController =
       StreamController<NativeVideoPlayerQuality>.broadcast();
   final StreamController<List<NativeVideoPlayerQuality>> _qualitiesController =
@@ -605,6 +607,11 @@ class NativeVideoPlayerController {
     if (oldState.qualities != newState.qualities) {
       if (!_qualitiesController.isClosed) {
         _qualitiesController.add(newState.qualities);
+      }
+    }
+    if (oldState.isLive != newState.isLive) {
+      if (!_isLiveController.isClosed) {
+        _isLiveController.add(newState.isLive);
       }
     }
   }
@@ -791,6 +798,9 @@ class NativeVideoPlayerController {
     }
     if (!_qualitiesController.isClosed && _state.qualities.isNotEmpty) {
       _qualitiesController.add(_state.qualities);
+    }
+    if (!_isLiveController.isClosed) {
+      _isLiveController.add(_state.isLive);
     }
   }
 
@@ -1148,6 +1158,27 @@ class NativeVideoPlayerController {
 
   /// Stream of fullscreen state changes
   Stream<bool> get isFullscreenStream => _isFullscreenController.stream;
+
+  /// Whether the loaded source is a live stream (HLS without an end).
+  ///
+  /// Known from the first time update after the stream starts. For a live
+  /// stream [duration] is the seekable (DVR) window, [currentPosition] is
+  /// measured from its start and [seekTo] takes a position in that window,
+  /// so a regular scrubber works as a DVR scrubber. See [liveEdgeOffset]
+  /// and [seekToLiveEdge].
+  bool get isLive => _state.isLive;
+
+  /// Stream of [isLive] changes.
+  Stream<bool> get isLiveStream => _isLiveController.stream;
+
+  /// How far playback is behind the live edge (zero for VOD). Stays a few
+  /// seconds above zero even at the edge, because players keep a small
+  /// distance to it.
+  Duration get liveEdgeOffset {
+    if (!_state.isLive) return Duration.zero;
+    final offset = _state.duration - _state.currentPosition;
+    return offset.isNegative ? Duration.zero : offset;
+  }
 
   /// Latest native video dimensions (reported by texture-rendered views;
   /// null until the first frame's size is known).
@@ -1669,6 +1700,9 @@ class NativeVideoPlayerController {
     // An A-B range only makes sense for the video it was set on.
     _playbackRange = null;
 
+    // The new source reports whether it is live with its first time update.
+    if (_state.isLive) _updateState(_state.copyWith(isLive: false));
+
     // Track indices belong to the previous source.
     _lastSubtitleTrack = null;
 
@@ -1849,8 +1883,17 @@ class NativeVideoPlayerController {
   }
 
   /// Seeks to a specific position
+  ///
+  /// For a live stream the position is within the seekable (DVR) window,
+  /// the way [currentPosition] reports it.
   Future<void> seekTo(Duration position) async {
     await _methodChannel?.seekTo(position);
+  }
+
+  /// Jumps a live stream back to its live edge, for a "Live" button after
+  /// the viewer paused or scrubbed back. Does nothing for VOD.
+  Future<void> seekToLiveEdge() async {
+    await _methodChannel?.seekToLiveEdge();
   }
 
   /// The active A-B playback range, or null when playback is unrestricted.
@@ -3153,6 +3196,7 @@ class NativeVideoPlayerController {
     await _isPipAvailableController.close();
     // Note: AirPlay stream controllers are managed by the global AirPlayStateManager
     await _isFullscreenController.close();
+    await _isLiveController.close();
     await _qualityChangedController.close();
     await _qualitiesController.close();
     await _isOverlayLockedController.close();

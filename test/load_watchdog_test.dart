@@ -160,7 +160,10 @@ void main() {
 
         // Native finishes loading before the timeout: the watchdog must be
         // cancelled and no error may fire afterwards.
-        viewSink!.success(<String, Object?>{'event': 'loaded', 'duration': 1000});
+        viewSink!.success(<String, Object?>{
+          'event': 'loaded',
+          'duration': 1000,
+        });
         await Future<void>.delayed(const Duration(milliseconds: 250));
 
         expect(controller.activityState, isNot(PlayerActivityState.error));
@@ -235,9 +238,7 @@ void main() {
         final errorEvent = activityEvents.lastWhere(
           (e) => e.state == PlayerActivityState.error,
         );
-        expect(errorEvent.data, {
-          'message': 'Buffering timed out after 100ms',
-        });
+        expect(errorEvent.data, {'message': 'Buffering timed out after 100ms'});
         // The watchdog quiesces the stalled pipeline.
         expect(log, contains('method:pause'));
 
