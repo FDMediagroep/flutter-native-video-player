@@ -174,19 +174,28 @@ class NativeVideoPlayerController {
   /// with rounded corners). Defaults to square.
   final BorderRadius fullscreenFlightBorderRadius;
 
-  /// BuildContext getter for showing Dart fullscreen dialog
-  /// Returns a mounted context from any registered platform view
+  /// The view Dart fullscreen opens from, flies out of and lands back in:
+  /// the one the user is looking at. With one controller on two screens (a
+  /// feed tile and the post it opens) the earlier screen's view is still
+  /// mounted under the page on top, so a view on the top route wins, then
+  /// the most recently attached one. The fullscreen host itself never counts.
   BuildContext? get _fullscreenContext {
-    // Try to find a mounted context from the registered platform views
-    for (final viewId in _platformViewIds) {
-      // We'll need to track contexts per platform view
-      final ctx = _platformViewContexts[viewId];
-      if (ctx != null && ctx.mounted) {
-        return ctx;
-      }
+    final List<BuildContext> candidates = <BuildContext>[
+      for (final int viewId in _platformViewIds.toList().reversed)
+        if (!_fullscreenViewIds.contains(viewId))
+          if (_platformViewContexts[viewId] case final BuildContext ctx?
+              when ctx.mounted)
+            ctx,
+    ];
+    for (final BuildContext ctx in candidates) {
+      if (ViewVisibility.isOnTopRoute(ctx)) return ctx;
     }
-    return null;
+    return candidates.isEmpty ? null : candidates.first;
   }
+
+  /// The view [enterFullScreen] would use for Dart fullscreen and its flight.
+  @visibleForTesting
+  BuildContext? get debugFullscreenContext => _fullscreenContext;
 
   /// Map of platform view IDs to their contexts
   final Map<int, BuildContext> _platformViewContexts = <int, BuildContext>{};

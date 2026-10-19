@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Fullscreen lands in the wrong player when one controller shows on two
+  screens.** With a feed tile and the page it opens sharing a controller,
+  Dart fullscreen opened from (and flew back into) the first view that was
+  attached, the tile under the page on top. It now uses the view on the top
+  route, then the most recently attached one.
+
 ## [1.7.0] - 2026-10-19
 
 ### Added

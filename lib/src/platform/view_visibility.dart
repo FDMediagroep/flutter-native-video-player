@@ -103,7 +103,7 @@ class ViewVisibility {
   /// ancestor's clip (a scrolled list, a clip widget) nor by the screen
   /// edge. [tolerance] (logical pixels) absorbs rounding.
   static bool isFullyVisible(BuildContext context, {double tolerance = 2}) {
-    if (!_isOnTopRoute(context)) {
+    if (!isOnTopRoute(context)) {
       return false;
     }
 
@@ -140,10 +140,11 @@ class ViewVisibility {
         visible.height >= full.height - tolerance;
   }
 
-  /// A page or dialog pushed over the player covers it without clipping it,
-  /// and a route still sliding in moves it: walks out through nested
-  /// navigators (a tab shell's) up to the root.
-  static bool _isOnTopRoute(BuildContext context) {
+  /// Whether [context]'s route, and every enclosing route, is on top and
+  /// done animating. A page or dialog pushed over the player covers it
+  /// without clipping it, and a route still sliding in moves it: walks out
+  /// through nested navigators (a tab shell's) up to the root.
+  static bool isOnTopRoute(BuildContext context) {
     BuildContext? current = context;
     while (current != null) {
       final ModalRoute<Object?>? route = ModalRoute.of(current);
