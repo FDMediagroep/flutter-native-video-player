@@ -624,11 +624,19 @@ Outro
       );
       controller.setChapters(_chapters);
 
+      // The native player confirms each seek before reporting positions far
+      // from its target (the controller drops stale ones until then).
+      Future<void> seekDone(int ms) async {
+        viewSink!.success({'event': 'seek', 'position': ms});
+        await tester.pump();
+      }
+
       await sendPosition(tester, 10000);
       await controller.seekToNextChapter();
       // Reported a hair before the start after the seek: still "next" is 45s.
       await sendPosition(tester, 29900);
       await controller.seekToNextChapter();
+      await seekDone(45000);
       await sendPosition(tester, 50000);
       await controller.seekToNextChapter(); // last chapter: nothing
       expect(seeks(), [30000, 45000]);
@@ -637,6 +645,7 @@ Outro
       await controller.seekToPreviousChapter();
       await sendPosition(tester, 46000);
       await controller.seekToPreviousChapter();
+      await seekDone(30000);
       await sendPosition(tester, 1000);
       await controller.seekToPreviousChapter();
       expect(seeks(), [30000, 45000, 45000, 30000, 0]);
