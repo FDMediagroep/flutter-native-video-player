@@ -1,19 +1,19 @@
-pro# native_video_player_example
+# better_native_video_player example
 
-Demonstrates how to use the native_video_player plugin.
+`lib/main.dart` is the showcase: one file with every feature of the
+plugin, in four tabs (Watch, Live, Feed, Binge).
 
-## Getting Started
+```sh
+flutter run
+```
 
-This project is a starting point for a Flutter application.
+`lib/dev_main.dart` is the test harness the plugin is developed against:
+perf screens, stress feeds, PiP and AirPlay repro screens, with
+[Marionette](https://github.com/leancodepl/marionette_mcp) for driving it.
 
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+```sh
+flutter run -t lib/dev_main.dart
+```
 
 ## Android engine regression tests
 
@@ -30,4 +30,4 @@ On Windows, use `gradlew.bat`. The instrumentation tests start two real Flutter
 engines with separate Dart isolates, reuse controller and texture view IDs, and
 check event routing and playback after engine detach. Audio is generated locally;
 Firebase and network media are not required. Build the normal example again with
-`flutter build apk --debug --target lib/main.dart` before using its demo screens.
+`flutter build apk --debug --target lib/dev_main.dart` before using its demo screens.

@@ -97,6 +97,7 @@ class NativeVideoPlayerPoster {
     this.showDurationBadge = true,
     this.badgeAlignment = Alignment.bottomRight,
     this.badgeBuilder,
+    this.showPlayButton = true,
     this.overlayBuilder,
   });
 
@@ -193,8 +194,16 @@ class NativeVideoPlayerPoster {
   )?
   badgeBuilder;
 
+  /// Without custom controls (`NativeVideoPlayer.overlayBuilder`), the
+  /// poster covers the native controls, so it shows a play button of its
+  /// own and a tap anywhere on it starts the video. Set false to draw your
+  /// own in [overlayBuilder]. With custom controls those take the taps and
+  /// this is ignored.
+  final bool showPlayButton;
+
   /// Draws anything on top of the poster: a title, a play button, a loading
-  /// hint. Interactive; taps beside its widgets reach the player.
+  /// hint. Interactive when the player has no custom controls overlay; with
+  /// one, taps go to the controls.
   final Widget Function(
     BuildContext context,
     NativeVideoPlayerPosterState state,
@@ -220,6 +229,7 @@ class NativeVideoPlayerPoster {
     AlignmentGeometry? badgeAlignment,
     Widget Function(BuildContext, String, NativeVideoPlayerPosterState)?
     badgeBuilder,
+    bool? showPlayButton,
     Widget Function(BuildContext, NativeVideoPlayerPosterState)? overlayBuilder,
   }) {
     return NativeVideoPlayerPoster(
@@ -239,6 +249,7 @@ class NativeVideoPlayerPoster {
       showDurationBadge: showDurationBadge ?? this.showDurationBadge,
       badgeAlignment: badgeAlignment ?? this.badgeAlignment,
       badgeBuilder: badgeBuilder ?? this.badgeBuilder,
+      showPlayButton: showPlayButton ?? this.showPlayButton,
       overlayBuilder: overlayBuilder ?? this.overlayBuilder,
     );
   }

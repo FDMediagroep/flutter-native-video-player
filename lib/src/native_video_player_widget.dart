@@ -942,6 +942,7 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
               PosterLayer(
                 poster: widget.poster!,
                 controller: widget.controller,
+                hasCustomControls: widget.overlayBuilder != null,
               ),
             ),
           );

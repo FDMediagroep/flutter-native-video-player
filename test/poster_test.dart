@@ -28,6 +28,7 @@ void main() {
   );
 
   late NativeVideoPlayerController controller;
+  late List<MethodCall> calls;
   MockStreamHandlerEventSink? viewSink;
 
   // Fresh ids per test, so a previous test's channel teardown can never
@@ -41,7 +42,9 @@ void main() {
     controllerId = 8800 + testSeq;
     viewId = 9800 + testSeq;
     viewSink = null;
+    calls = <MethodCall>[];
     messenger.setMockMethodCallHandler(methodChannel, (call) async {
+      calls.add(call);
       return call.method == 'getAvailableQualities' ? <Object?>[] : null;
     });
   });
@@ -56,8 +59,9 @@ void main() {
 
   Future<void> pumpPoster(
     WidgetTester tester,
-    NativeVideoPlayerPoster poster,
-  ) async {
+    NativeVideoPlayerPoster poster, {
+    bool hasCustomControls = false,
+  }) async {
     messenger.setMockStreamHandler(
       EventChannel('native_video_player_controller_$controllerId'),
       MockStreamHandler.inline(onListen: (arguments, events) {}),
@@ -81,7 +85,11 @@ void main() {
     await tester.pumpWidget(
       Directionality(
         textDirection: TextDirection.ltr,
-        child: PosterLayer(poster: poster, controller: controller),
+        child: PosterLayer(
+          poster: poster,
+          controller: controller,
+          hasCustomControls: hasCustomControls,
+        ),
       ),
     );
   }
@@ -247,6 +255,21 @@ void main() {
     await send(tester, {'event': 'loaded', 'duration': 75000});
     await tester.pump();
     expect(find.text('ready'), findsOneWidget);
+  });
+
+  testWidgets('over native controls the poster plays on tap', (tester) async {
+    await pumpPoster(tester, NativeVideoPlayerPoster(image: pixel));
+    await tester.tap(find.text('\u25B6'));
+    expect(calls.where((c) => c.method == 'play'), hasLength(1));
+  });
+
+  testWidgets('custom controls take the taps: no play button', (tester) async {
+    await pumpPoster(
+      tester,
+      NativeVideoPlayerPoster(image: pixel),
+      hasCustomControls: true,
+    );
+    expect(find.text('\u25B6'), findsNothing);
   });
 
   group('Bunny Stream', () {

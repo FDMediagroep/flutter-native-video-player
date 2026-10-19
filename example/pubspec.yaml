@@ -66,6 +66,7 @@ flutter:
   assets:
     - assets/sample_en.vtt
     - assets/sample_nl.srt
+    - assets/showcase/
 
 
   # An image asset can refer to one or more resolution-specific "variants", see

@@ -15,7 +15,8 @@ flutter test                    # run all Dart tests
 flutter test test/native_video_player_test.dart   # run a single test file
 dart format .                   # format (run before committing)
 
-cd example && flutter run       # run the example app (needs an iOS/Android device)
+cd example && flutter run       # run the showcase app (needs an iOS/Android device)
+cd example && flutter run -t lib/dev_main.dart   # the test harness with Marionette and perf screens
 ```
 
 Tests live in `test/` and mock the `native_video_player` MethodChannel with `setMockMethodCallHandler` — there are no integration tests against real players; verifying native behavior requires running the example app on a device.
@@ -24,9 +25,9 @@ Tests live in `test/` and mock the `native_video_player` MethodChannel with `set
 
 ### Verifying changes with Marionette
 
-The example app embeds [Marionette](https://github.com/leancodepl/marionette_mcp) (`MarionetteBinding.ensureInitialized()` in `example/lib/main.dart`), and the `marionette` MCP server is registered in `.mcp.json`, so you can drive the running app yourself instead of asking the user to test:
+The example's test harness embeds [Marionette](https://github.com/leancodepl/marionette_mcp) (`MarionetteBinding.ensureInitialized()` in `example/lib/dev_main.dart`; `example/lib/main.dart` is the pub.dev showcase), and the `marionette` MCP server is registered in `.mcp.json`, so you can drive the running app yourself instead of asking the user to test:
 
-1. `cd example && flutter run` on a device/simulator (debug mode only — Marionette needs the VM service).
+1. `cd example && flutter run -t lib/dev_main.dart` on a device/simulator (debug mode only — Marionette needs the VM service).
 2. Copy the VM Service URI from the run output (`ws://127.0.0.1:<port>/<token>/ws`).
 3. Call the `marionette` MCP `connect` tool with that URI, then use its screenshot/tap/scroll/enter-text tools to verify behavior.
 

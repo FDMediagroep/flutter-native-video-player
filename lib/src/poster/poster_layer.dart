@@ -13,11 +13,16 @@ class PosterLayer extends StatefulWidget {
   const PosterLayer({
     required this.poster,
     required this.controller,
+    this.hasCustomControls = false,
     super.key,
   });
 
   final NativeVideoPlayerPoster poster;
   final NativeVideoPlayerController controller;
+
+  /// Whether the player draws custom controls over the poster. Without
+  /// them the poster covers the native controls, so it plays on tap.
+  final bool hasCustomControls;
 
   @override
   State<PosterLayer> createState() => _PosterLayerState();
@@ -220,6 +225,8 @@ class _PosterLayerState extends State<PosterLayer> {
               ],
             ),
           ),
+          if (!widget.hasCustomControls && poster.showPlayButton)
+            Center(child: _PlayButton(onTap: _controller.play)),
           if (poster.overlayBuilder != null)
             poster.overlayBuilder!(context, state),
         ],
@@ -236,6 +243,42 @@ String formatPosterDuration(Duration duration) {
   return hours > 0
       ? '$hours:${minutes.toString().padLeft(2, '0')}:$seconds'
       : '$minutes:$seconds';
+}
+
+class _PlayButton extends StatelessWidget {
+  const _PlayButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: 'Play',
+      child: GestureDetector(
+        onTap: onTap,
+        child: const DecoratedBox(
+          decoration: BoxDecoration(
+            color: Color(0x8C000000),
+            shape: BoxShape.circle,
+          ),
+          child: SizedBox.square(
+            dimension: 64,
+            child: Center(
+              child: Text(
+                '\u25B6',
+                style: TextStyle(
+                  color: Color(0xFFFFFFFF),
+                  fontSize: 26,
+                  decoration: TextDecoration.none,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _DefaultBadge extends StatelessWidget {
