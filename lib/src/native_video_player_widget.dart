@@ -88,7 +88,10 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
   Future<Uint8List?> _snapshotLayers() async {
     if (!mounted) return null;
     final double pixelRatio = MediaQuery.devicePixelRatioOf(context);
-    final List<ui.Image> layers = <ui.Image>[];
+    // Both layers are taken from the frame on screen now, before awaiting
+    // either: a rebuild in between (the overlay restyling for fullscreen)
+    // must not reach the snapshot.
+    final List<Future<ui.Image>> captures = <Future<ui.Image>>[];
     for (final GlobalKey key in <GlobalKey>[
       _posterBoundaryKey,
       _overlayBoundaryKey,
@@ -96,9 +99,17 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
       final RenderObject? boundary = key.currentContext?.findRenderObject();
       if (boundary is! RenderRepaintBoundary || !boundary.hasSize) continue;
       try {
-        layers.add(await boundary.toImage(pixelRatio: pixelRatio));
+        captures.add(boundary.toImage(pixelRatio: pixelRatio));
       } catch (_) {
         // Not painted yet (e.g. a hidden overlay): leave that layer out.
+      }
+    }
+    final List<ui.Image> layers = <ui.Image>[];
+    for (final Future<ui.Image> capture in captures) {
+      try {
+        layers.add(await capture);
+      } catch (_) {
+        // Not painted yet: leave that layer out.
       }
     }
     if (layers.isEmpty) return null;

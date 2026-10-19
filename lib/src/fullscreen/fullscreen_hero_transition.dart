@@ -33,6 +33,7 @@ class FullscreenHeroFlight {
     required this.inlineRect,
     required this.capturePoster,
     this.videoAspectRatio,
+    this.currentAspectRatio,
     this.inlineBorderRadius = BorderRadius.zero,
     this.createLiveTexture,
     this.disposeLiveTexture,
@@ -93,8 +94,12 @@ class FullscreenHeroFlight {
   /// Width / height of the video. Both players letterbox it (aspect fit),
   /// so the frame flies between the video's own rects inside the inline box
   /// and inside the screen, never a black box around it. Null flies the
-  /// boxes themselves.
-  final double? videoAspectRatio;
+  /// boxes themselves. Updated from [currentAspectRatio] for the way back.
+  double? videoAspectRatio;
+
+  /// The video's aspect ratio now, or null while there is no video frame
+  /// (a video that only loaded in fullscreen flies back as a video).
+  final double? Function()? currentAspectRatio;
 
   /// The corners of the inline player's clip, which the frame takes on as it
   /// lands inline and sheds (square) in fullscreen.
@@ -129,8 +134,16 @@ class FullscreenHeroFlight {
       const Duration(milliseconds: 250),
       onTimeout: () => null,
     );
+    final Uint8List? before = poster;
     await refreshPoster(context);
     final int? textureId = await texture;
+    // A new frame (the video loaded in fullscreen) flies at the video's
+    // shape; the snapshot it replaces had the player's.
+    if (!identical(before, poster)) {
+      if (currentAspectRatio?.call() case final double aspectRatio) {
+        videoAspectRatio = aspectRatio;
+      }
+    }
     releaseLiveTexture();
     liveTextureId = textureId;
   }

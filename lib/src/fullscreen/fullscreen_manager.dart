@@ -150,6 +150,9 @@ class FullscreenManager {
     await enterFullscreen(lockToLandscape: lockToLandscape);
 
     if (!context.mounted) {
+      // Never shown: undo the fullscreen state like a closed one.
+      await exitFullscreen();
+      onExit?.call();
       return null;
     }
 

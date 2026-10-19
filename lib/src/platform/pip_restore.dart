@@ -55,10 +55,19 @@ class PipRestore {
       return;
     }
     _handlers[controllerId] = handler;
-    if (!_handlerInstalled) {
-      _handlerInstalled = true;
-      _channel.setMethodCallHandler(_handle);
+    ensureListening();
+  }
+
+  /// Answers the native side's restore requests from now on, also while no
+  /// controller has a handler. Unanswered, a request sits in the channel's
+  /// buffer and AVKit waits for the native 3 s backstop before the window
+  /// goes back into the app.
+  static void ensureListening() {
+    if (_handlerInstalled) {
+      return;
     }
+    _handlerInstalled = true;
+    _channel.setMethodCallHandler(_handle);
   }
 
   /// Clears [handler] for [controllerId] if it is still the one set.

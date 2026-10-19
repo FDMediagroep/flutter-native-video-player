@@ -82,6 +82,9 @@ class NativeVideoPlayerController {
 
     // Set up controller-level event channel for persistent events (PiP, AirPlay)
     _controllerChannelSetupFuture = _setupControllerEventChannel();
+
+    // iOS waits for an answer before the PiP window flies back.
+    PipRestore.ensureListening();
   }
 
   /// Initialize the controller and wait for the platform view to be created
@@ -225,6 +228,11 @@ class NativeVideoPlayerController {
         !state.isLoading &&
         !state.hasError;
   }
+
+  /// Internal: whether the player has a video frame to show (see
+  /// [_hasVideoFrame]); without one, Dart fullscreen keeps the overlay (an
+  /// app's thumbnail often lives there) while a swipe drags the page.
+  bool get hasVideoFrame => _hasVideoFrame;
 
   /// Overlay builder to use in fullscreen mode
   /// This is passed from NativeVideoPlayer widget
@@ -670,6 +678,12 @@ class NativeVideoPlayerController {
 
       // Start a 400ms timer - only emit buffering state if still buffering after 400ms
       _bufferingDebounceTimer = Timer(const Duration(milliseconds: 400), () {
+        // A seek on a playing video holds this too (see _seekHoldTimer): it
+        // applies once the hold runs out without the video playing on.
+        if (_isCurrentlyBuffering && _seekHoldTimer != null) {
+          _heldSeekEvent ??= <String, Object?>{'event': 'buffering'};
+          return;
+        }
         // Check if we're still buffering after 400ms
         if (_isCurrentlyBuffering &&
             _state.activityState != PlayerActivityState.buffering) {
@@ -682,6 +696,7 @@ class NativeVideoPlayerController {
     } else {
       // Buffering stopped - cancel the timer and restore previous state
       _bufferingDebounceTimer?.cancel();
+      if (_heldSeekEvent?['event'] == 'buffering') _heldSeekEvent = null;
 
       // If we were showing buffering state, restore the previous state
       if (_state.activityState == PlayerActivityState.buffering) {
@@ -1736,6 +1751,7 @@ class NativeVideoPlayerController {
     // An A-B range only makes sense for the video it was set on.
     _playbackRange = null;
     _pendingSeekTarget = null;
+    _endSeekHold();
 
     // The new source reports whether it is live with its first time update.
     if (_state.isLive) _updateState(_state.copyWith(isLive: false));
@@ -1910,6 +1926,7 @@ class NativeVideoPlayerController {
 
   /// Pauses video playback
   Future<void> pause() async {
+    _endSeekHold();
     final bool pausedWithoutView = await _methodChannel?.pause() ?? false;
     // Without a view no native pause event reaches Dart, so report it here.
     if (pausedWithoutView &&
@@ -1927,6 +1944,9 @@ class NativeVideoPlayerController {
     final Duration target = position.isNegative ? Duration.zero : position;
     _pendingSeekTarget = target;
     _pendingSeekSince = DateTime.now();
+    if (_state.activityState.isPlaying || _seekHoldTimer != null) {
+      _startSeekHold();
+    }
     // Show the target right away; the native side confirms it shortly.
     _updateState(_state.copyWith(currentPosition: target));
     await _methodChannel?.seekTo(position);
@@ -1952,6 +1972,46 @@ class NativeVideoPlayerController {
       return false;
     }
     return true;
+  }
+
+  /// While a seek runs on a playing video, the native player reports a
+  /// pause, loading or buffering for a moment before it plays on (iOS: the
+  /// buffer refilling, Android: ExoPlayer buffering). Those are held back
+  /// for up to [_seekHoldWindow], so a play/pause button doesn't flash; the
+  /// last one held still applies when the video doesn't play on in time
+  /// (a real stall). Scrubbing (seek after seek) keeps the hold going.
+  Timer? _seekHoldTimer;
+  Map<Object?, Object?>? _heldSeekEvent;
+  static const Duration _seekHoldWindow = Duration(milliseconds: 600);
+
+  void _startSeekHold() {
+    _seekHoldTimer?.cancel();
+    _seekHoldTimer = Timer(_seekHoldWindow, () {
+      final Map<Object?, Object?>? held = _heldSeekEvent;
+      _endSeekHold();
+      if (held != null && !_isDisposed) _handlePlatformViewEvent(held);
+    });
+  }
+
+  void _endSeekHold() {
+    _seekHoldTimer?.cancel();
+    _seekHoldTimer = null;
+    _heldSeekEvent = null;
+  }
+
+  /// Whether [state] is a seek blip to hold back (see [_seekHoldTimer]).
+  bool _holdsDuringSeek(
+    Map<Object?, Object?> event,
+    PlayerActivityState state,
+  ) {
+    if (_seekHoldTimer == null) return false;
+    if (state.isPaused || state.isLoading || state.isBuffering) {
+      _heldSeekEvent = event;
+      return true;
+    }
+    // Playing on (or anything final): the hold is over.
+    _endSeekHold();
+    return false;
   }
 
   /// Jumps a live stream back to its live edge, for a "Live" button after
@@ -2652,6 +2712,13 @@ class NativeVideoPlayerController {
       return;
     }
 
+    // Nothing loaded yet: the flight carries what the player shows in
+    // Flutter, taken now, before its overlay hears about fullscreen (an app
+    // may restyle it for fullscreen, e.g. a back button).
+    final Future<Uint8List?>? inlineLayers = _hasVideoFrame
+        ? null
+        : _snapshotOfView(_fullscreenContext);
+
     _updateState(_state.copyWith(isFullScreen: true));
 
     // Enable automatic PiP and refresh availability immediately after entering fullscreen on Android
@@ -2677,7 +2744,7 @@ class NativeVideoPlayerController {
       }
 
       // Use Dart fullscreen when we have a custom overlay
-      await _enterDartFullscreen();
+      await _enterDartFullscreen(inlineLayers: inlineLayers);
     } else {
       // Use native fullscreen when no custom overlay
       await _methodChannel?.enterFullScreen();
@@ -2761,7 +2828,7 @@ class NativeVideoPlayerController {
   }
 
   /// Enters Dart-based fullscreen mode
-  Future<void> _enterDartFullscreen() async {
+  Future<void> _enterDartFullscreen({Future<Uint8List?>? inlineLayers}) async {
     final context = _fullscreenContext;
 
     if (context == null) {
@@ -2772,6 +2839,7 @@ class NativeVideoPlayerController {
 
     final FullscreenHeroFlight? heroFlight = await _fullscreenHeroFlight(
       context,
+      inlineLayers: inlineLayers,
     );
     if (!context.mounted) {
       _updateState(_state.copyWith(isFullScreen: false));
@@ -2799,6 +2867,8 @@ class NativeVideoPlayerController {
         // completes when the pop starts, not when the video has landed.)
         if (heroFlight == null) {
           _fullscreenFlightPhase.value = FullscreenFlightPhase.none;
+        } else {
+          _endFlightPhaseLater();
         }
         // Update state when fullscreen dialog is dismissed by user (back button, etc.)
         _dartFullscreenCloseCallback = null;
@@ -2826,8 +2896,9 @@ class NativeVideoPlayerController {
   /// or when the screen turns on the way in (a landscape lock from portrait
   /// would leave the inline rect behind).
   Future<FullscreenHeroFlight?> _fullscreenHeroFlight(
-    BuildContext context,
-  ) async {
+    BuildContext context, {
+    Future<Uint8List?>? inlineLayers,
+  }) async {
     int? viewId;
     _platformViewContexts.forEach((id, ctx) {
       if (identical(ctx, context)) viewId = id;
@@ -2854,7 +2925,7 @@ class NativeVideoPlayerController {
       final bool hasFrame = _hasVideoFrame;
       final Uint8List? layers = hasFrame
           ? null
-          : await _viewSnapshots[viewId]?.call();
+          : await (inlineLayers ?? _viewSnapshots[viewId]?.call());
       if (!hasFrame && layers == null) return null;
       if (layers != null && context.mounted) {
         await precacheImage(MemoryImage(layers), context);
@@ -2866,7 +2937,11 @@ class NativeVideoPlayerController {
         startRect: startRect,
         inlineRect: () => context.mounted ? _globalRectOf(context) : null,
         capturePoster: () async => null,
-        videoAspectRatio: _videoSize?.aspectRatio,
+        // The snapshot flies at its own shape (the inline player's), like
+        // the video would at its own.
+        videoAspectRatio: layers != null
+            ? await _imageAspectRatio(layers)
+            : _videoSize?.aspectRatio,
         onReturn: () => unawaited(FullscreenManager.restoreSystemUi()),
         onLanding: () => _landFlight(viewId!),
         onDone: () => _fullscreenFlightPhase.value = FullscreenFlightPhase.none,
@@ -2875,6 +2950,7 @@ class NativeVideoPlayerController {
     }
 
     // The primary view: this one now, the fullscreen view on the way back.
+    // Nothing loaded yet: what that view shows in Flutter (poster, controls).
     Future<Uint8List?> capture() => capturePosterFrame(
       _primaryPlatformViewId ?? viewId!,
       maxWidth: maxWidth,
@@ -2904,7 +2980,7 @@ class NativeVideoPlayerController {
         poster ??
         (_hasVideoFrame || !context.mounted
             ? null
-            : await _viewSnapshots[viewId]?.call());
+            : await (inlineLayers ?? _viewSnapshots[viewId]?.call()));
     if (flown == null || !context.mounted) {
       if (liveTextureId != null) disposeLiveTexture(liveTextureId);
       return null;
@@ -2922,12 +2998,31 @@ class NativeVideoPlayerController {
       startRect: startRect,
       inlineRect: () => context.mounted ? _globalRectOf(context) : null,
       capturePoster: capture,
-      videoAspectRatio: await _aspectRatioOf(flown),
+      // A snapshot of the player's layers flies at its own shape (the
+      // inline player's), like a video frame at the video's.
+      videoAspectRatio: poster != null
+          ? await _aspectRatioOf(flown)
+          : await _imageAspectRatio(flown),
+      currentAspectRatio: () => _hasVideoFrame ? _videoSize?.aspectRatio : null,
       onReturn: () => unawaited(FullscreenManager.restoreSystemUi()),
       onLanding: () => _landFlight(viewId!),
       onDone: () => _fullscreenFlightPhase.value = FullscreenFlightPhase.none,
       inlineBorderRadius: fullscreenFlightBorderRadius,
     );
+  }
+
+  /// Backstop for the flight ending the phase: a route closed before its
+  /// flight was built, or whose way back was cut short (iOS PiP starting as
+  /// fullscreen closes), never would, and the inline slot would stay empty
+  /// for good while the video plays on. Runs once the way back is surely
+  /// over, unless fullscreen opened again meanwhile.
+  void _endFlightPhaseLater() {
+    Timer(const Duration(milliseconds: 800), () {
+      if (_isDisposed || _state.isFullScreen) return;
+      if (_fullscreenFlightPhase.value != FullscreenFlightPhase.none) {
+        _fullscreenFlightPhase.value = FullscreenFlightPhase.none;
+      }
+    });
   }
 
   /// The way back has nearly landed (the flight covers the inline slot):
@@ -2948,8 +3043,25 @@ class NativeVideoPlayerController {
   Future<double?> _aspectRatioOf(Uint8List frame) async {
     final double? reported = _videoSize?.aspectRatio;
     if (reported != null && reported.isFinite && reported > 0) return reported;
+    return _imageAspectRatio(frame);
+  }
+
+  /// The snapshot of what [context]'s player view shows in Flutter.
+  Future<Uint8List?>? _snapshotOfView(BuildContext? context) {
+    if (context == null) return null;
+    for (final MapEntry<int, BuildContext> entry
+        in _platformViewContexts.entries) {
+      if (identical(entry.value, context)) {
+        return _viewSnapshots[entry.key]?.call();
+      }
+    }
+    return null;
+  }
+
+  /// Width / height of an encoded image.
+  static Future<double?> _imageAspectRatio(Uint8List bytes) async {
     try {
-      final image = await decodeImageFromList(frame);
+      final image = await decodeImageFromList(bytes);
       final double aspectRatio = image.width / image.height;
       image.dispose();
       return aspectRatio;
@@ -3126,6 +3238,7 @@ class NativeVideoPlayerController {
     // Cancel buffering debounce timer
     _bufferingDebounceTimer?.cancel();
     _bufferingDebounceTimer = null;
+    _endSeekHold();
 
     // Cancel the stalled-playback watchdogs — the handlers they would
     // notify are cleared below, and the native player is paused anyway.
@@ -3249,6 +3362,7 @@ class NativeVideoPlayerController {
     // Cancel buffering debounce timer
     _bufferingDebounceTimer?.cancel();
     _bufferingDebounceTimer = null;
+    _endSeekHold();
 
     // Clear all event handlers
     _activityEventHandlers.clear();

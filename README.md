@@ -352,6 +352,8 @@ Bunny Stream users get it in one line. It uses the video's `thumbnail.jpg` and `
 poster: NativeVideoPlayerPoster.bunny('https://vz-abc123.b-cdn.net/$videoId'),
 ```
 
+A protected pull zone? Pass `headers:` and both images are requested with them. For any other host, give `image` a `NetworkImage(url, headers: {...})`.
+
 > Why no MP4/WebM preview? A muted second native player would still take over the audio session and pause the user's music, and iOS can't play WebM. Use GIF or animated WebP, or draw your own preview in `overlayBuilder`.
 
 ### Scrub previews

@@ -159,17 +159,16 @@ extension VideoPlayerView {
                     }
                 }
             case "playbackLikelyToKeepUp":
-                // Send loading event when buffer is ready, then restore playback state
-                // This is important for seeking while paused - user needs to know buffering is done
+                // Buffer is ready (after loading, buffering or a seek): restore
+                // the playback state, so seeking while paused ends buffering.
+                // No "loading" first: a playing video would flash its play
+                // button on every seek. Still waiting to play (rate set, not
+                // playing yet): the timeControlStatus observer sends "play".
                 if item.isPlaybackLikelyToKeepUp {
-                    sendEvent("loading")
-
-                    // Restore the playback state after buffering completes
-                    // This tells the UI whether the video is playing or paused
                     if let player = player {
                         if player.rate > 0 && player.timeControlStatus == .playing {
                             sendEvent("play")
-                        } else if player.timeControlStatus == .paused && player.reasonForWaitingToPlay == nil {
+                        } else if player.rate == 0 && player.timeControlStatus == .paused && player.reasonForWaitingToPlay == nil {
                             sendEvent("pause")
                         }
                     }

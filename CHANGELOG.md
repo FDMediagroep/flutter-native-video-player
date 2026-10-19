@@ -22,6 +22,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before a seek arrived after it, so the position snapped back to the old
   time before the new one. `seekTo` now shows the target right away and
   drops those leftovers until the native seek is done.
+- **The play button flashed while seeking a playing video.** The native
+  player reports a moment of pause, loading or buffering during a seek (iOS
+  also sent `loading` every time the buffer refilled). Those blips are now
+  held back for up to 600 ms while a playing video seeks; a stall that lasts
+  longer still shows as buffering.
+- **Leaving PiP with its own button took about three seconds on iOS.** An
+  app without `onPictureInPictureRestore` never answered the restore request,
+  so AVKit waited for the plugin's backstop. The controller now always
+  answers right away.
+- **The inline player could stay empty after fullscreen.** When the way
+  back from Dart fullscreen was cut short (PiP starting as fullscreen
+  closes), the inline slot stayed empty while the video played on. It now
+  comes back once fullscreen is gone.
+- **A video that isn't loaded yet flew as a squeezed box and dragged as a
+  black page.** It now flies as the player's box, keeps its overlay (where
+  an app's thumbnail often lives) while a swipe drags fullscreen down, and
+  flies back what fullscreen shows.
+
+### Added
+- `NativeVideoPlayerPoster.bunny(headers:)` for pull zones that need request
+  headers.
 
 ### Changed
 - The pub.dev screenshots are square tiles with a caption, so they fill the

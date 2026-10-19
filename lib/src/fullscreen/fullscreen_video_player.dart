@@ -133,10 +133,14 @@ class _FullscreenVideoPlayerState extends State<FullscreenVideoPlayer> {
                 ) => ValueListenableBuilder<double>(
                   valueListenable: _dragProgress,
                   // Controls get out of the way as soon as a drag starts.
+                  // Nothing loaded: the overlay is all there is to see (an
+                  // app's thumbnail often lives in it), so it moves along.
                   builder: (context, progress, child) => IgnorePointer(
                     ignoring: progress > 0,
                     child: Opacity(
-                      opacity: (1 - progress * 4).clamp(0.0, 1.0),
+                      opacity: controller.hasVideoFrame
+                          ? (1 - progress * 4).clamp(0.0, 1.0)
+                          : 1,
                       child: child,
                     ),
                   ),

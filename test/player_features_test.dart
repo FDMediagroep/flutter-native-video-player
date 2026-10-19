@@ -507,5 +507,76 @@ img.jpg#xywh=oops,0,160
       await sendPosition(tester, 1000);
       expect(controller.currentPosition, const Duration(seconds: 1));
     });
+
+    testWidgets('a playing video stays playing through a seek', (tester) async {
+      await attachView(tester);
+      await sendEvent(tester, {'event': 'play'});
+      final states = <PlayerActivityState>[];
+      final sub = controller.playerStateStream.listen(states.add);
+
+      // Scrubbing: the native player blips between seeks.
+      await controller.seekTo(const Duration(seconds: 30));
+      await sendEvent(tester, {'event': 'pause'});
+      await controller.seekTo(const Duration(seconds: 31));
+      await sendEvent(tester, {'event': 'buffering'});
+      await sendEvent(tester, {'event': 'loading'});
+      await sendEvent(tester, {'event': 'play'});
+      await tester.pump(const Duration(seconds: 1));
+
+      expect(controller.activityState, PlayerActivityState.playing);
+      expect(states.where((s) => s != PlayerActivityState.playing), isEmpty);
+      unawaited(sub.cancel());
+    });
+
+    testWidgets('buffering reported by position updates is held too', (
+      tester,
+    ) async {
+      await attachView(tester);
+      await sendEvent(tester, {'event': 'play'});
+      final states = <PlayerActivityState>[];
+      final sub = controller.playerStateStream.listen(states.add);
+
+      await controller.seekTo(const Duration(seconds: 30));
+      Future<void> tick(int ms, {required bool buffering}) =>
+          sendEvent(tester, {
+            'event': 'timeUpdate',
+            'position': ms,
+            'duration': 60000,
+            'bufferedPosition': ms,
+            'isBuffering': buffering,
+          });
+      await tick(30000, buffering: true);
+      await tester.pump(const Duration(milliseconds: 450));
+      await tick(30100, buffering: false);
+      await sendEvent(tester, {'event': 'play'});
+      await tester.pump(const Duration(seconds: 1));
+
+      expect(states.where((s) => s != PlayerActivityState.playing), isEmpty);
+      unawaited(sub.cancel());
+    });
+
+    testWidgets('a stall after a seek still shows as buffering', (
+      tester,
+    ) async {
+      await attachView(tester);
+      await sendEvent(tester, {'event': 'play'});
+
+      await controller.seekTo(const Duration(seconds: 30));
+      await sendEvent(tester, {'event': 'buffering'});
+      expect(controller.activityState, PlayerActivityState.playing);
+
+      await tester.pump(const Duration(milliseconds: 700));
+      expect(controller.activityState, PlayerActivityState.buffering);
+    });
+
+    testWidgets('pausing during a seek pauses right away', (tester) async {
+      await attachView(tester);
+      await sendEvent(tester, {'event': 'play'});
+
+      await controller.seekTo(const Duration(seconds: 30));
+      await controller.pause();
+      await sendEvent(tester, {'event': 'pause'});
+      expect(controller.activityState, PlayerActivityState.paused);
+    });
   });
 }

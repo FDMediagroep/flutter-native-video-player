@@ -360,6 +360,10 @@ extension _ControllerEventPlumbing on NativeVideoPlayerController {
         _isInitializing = false;
       }
 
+      if (_holdsDuringSeek(map, activityEvent.state)) {
+        return;
+      }
+
       // Update the last non-buffering state when we receive play/pause events
       // This ensures we can restore to the correct state after buffering
       if (activityEvent.state == PlayerActivityState.playing ||

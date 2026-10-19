@@ -108,9 +108,12 @@ class NativeVideoPlayerPoster {
   /// [videoBaseUrl] is the video's folder on the pull zone:
   /// `https://{pull_zone}.b-cdn.net/{video_id}`. Bunny only creates the
   /// preview when "Enable preview animation" is on for the library; pass
-  /// `preview: false` otherwise. Change anything else with [copyWith].
+  /// `preview: false` otherwise. [headers] go with both image requests
+  /// (a pull zone with token authentication or a referrer check). Change
+  /// anything else with [copyWith].
   factory NativeVideoPlayerPoster.bunny(
     String videoBaseUrl, {
+    Map<String, String>? headers,
     String thumbnailFileName = 'thumbnail.jpg',
     bool preview = true,
     bool gifPreview = false,
@@ -122,9 +125,12 @@ class NativeVideoPlayerPoster {
         ? videoBaseUrl.substring(0, videoBaseUrl.length - 1)
         : videoBaseUrl;
     return NativeVideoPlayerPoster(
-      image: NetworkImage('$base/$thumbnailFileName'),
+      image: NetworkImage('$base/$thumbnailFileName', headers: headers),
       animation: preview
-          ? NetworkImage('$base/${gifPreview ? 'preview.gif' : 'preview.webp'}')
+          ? NetworkImage(
+              '$base/${gifPreview ? 'preview.gif' : 'preview.webp'}',
+              headers: headers,
+            )
           : null,
       animationDelay: animationDelay,
       animationDuration: animationDuration,
