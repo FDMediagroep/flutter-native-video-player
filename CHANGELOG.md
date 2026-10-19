@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The new view now takes over the window and the surface it plays from: the
   tile shows the PiP placeholder, and closing the window returns it to the
   tile where it is now.
+- **iOS: closing PiP over a tile that is not fully visible.** AVKit flies the
+  window to the player's whole frame and draws it above the app, so for a
+  tile half under the app bar the video covered the app bar until the
+  animation ended, and for a tile scrolled off screen it flew off screen. The
+  window now only flies back into a player the widget reports as fully
+  visible (no scroll view or clip cuts it). Otherwise it closes in place and
+  the video plays on in the tile.
 
 ## [1.6.7] - 2026-10-15
 

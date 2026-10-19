@@ -372,7 +372,18 @@ extension VideoPlayerView: AVPictureInPictureControllerDelegate {
         }
 
         // Ensure player view is visible after exiting PiP
+        reattachInlineSurface()
         setInlineViewVisible()
+
+        // Closed without the restore animation (tile not fully visible): AVKit may
+        // pause then, but the video goes on in the tile.
+        if playOnAfterPipStop {
+            playOnAfterPipStop = false
+            if player?.rate == 0 {
+                npLog("   → Playing on in view \(viewId)")
+                player?.play()
+            }
+        }
 
         // IMPORTANT: Clear manual PiP flag FIRST before re-enabling anything
         // This allows the automatic PiP system to work again
@@ -549,7 +560,23 @@ extension VideoPlayerView: AVPictureInPictureControllerDelegate {
                 npLog("⚠️ No media info available for PiP restore (active view)")
             }
 
-            completionHandler(true)
+            // AVKit flies the window to this view's whole frame, above all
+            // Flutter content: into a tile scrolled off screen (but still
+            // built), or over the app bar for a tile half under it. Only fly
+            // into a fully visible view; otherwise close the window in place
+            // and play on in the tile. Declining the restore alone, or hiding
+            // the surface, still flies to the layer: the surface leaves the
+            // window until didStop puts it back. exitPictureInPicture does
+            // this before stopping; here it covers the window's own button.
+            let wasPlaying = player?.rate ?? 0 > 0
+            queryFullyVisible { [weak self] visible in
+                if !visible, let self = self {
+                    npLog("ℹ️ View \(self.viewId) is not fully visible - closing PiP without the restore animation")
+                    self.playOnAfterPipStop = wasPlaying
+                    self.detachInlineSurfaceUntilPipStops()
+                }
+                completionHandler(visible)
+            }
             return
         }
 

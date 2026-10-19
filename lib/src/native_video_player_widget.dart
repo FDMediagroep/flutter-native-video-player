@@ -12,6 +12,7 @@ import 'enums/native_video_player_event.dart';
 import 'models/native_video_player_subtitle_style.dart';
 import 'models/native_video_player_video_size.dart';
 import 'platform/video_player_method_channel.dart';
+import 'platform/view_visibility.dart';
 import 'subtitles/subtitle_overlay.dart';
 
 /// A native video player widget that wraps platform-specific video players
@@ -244,6 +245,7 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
   void dispose() {
     // Notify the controller that this platform view is being disposed
     if (_platformViewId != null) {
+      ViewVisibility.unregister(_platformViewId!, context);
       widget.controller.onPlatformViewDisposed(_platformViewId!);
     }
     // A swap that never completed still owns the old texture view.
@@ -265,6 +267,7 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
   /// Called when the platform view is created
   Future<void> _onPlatformViewCreated(int id) async {
     _platformViewId = id;
+    ViewVisibility.register(id, context);
     if (widget.isFullscreenContext) {
       widget.controller.registerFullscreenView(id);
     }

@@ -56,6 +56,10 @@ import QuartzCore
     private var methodChannel: FlutterMethodChannel
     private var channelName: String
 
+    // Asks the Dart widget whether this view is fully visible (see
+    // queryFullyVisible). Only invoked from here; Dart answers.
+    let visibilityChannel: FlutterMethodChannel
+
     // The sink lives in its own object so sendEvent's main-queue block can
     // hold it instead of the view: a block that retains the view keeps a
     // dangling pointer when it is created while the view deallocates
@@ -106,6 +110,10 @@ import QuartzCore
     // took over that window and the surface it plays from (see
     // takeOverPipWindow): its deinit leaves that surface alone.
     var handedOverPipWindow = false
+
+    // Set when the PiP window closed without flying back because this view
+    // was off screen: didStop then plays on if the player was playing.
+    var playOnAfterPipStop = false
 
     // Track if we've already registered remote command handlers
     // This prevents re-registering and clearing targets unnecessarily
@@ -240,6 +248,10 @@ import QuartzCore
         channelName = "native_video_player_\(viewId)"
         methodChannel = FlutterMethodChannel(
             name: channelName,
+            binaryMessenger: messenger
+        )
+        visibilityChannel = FlutterMethodChannel(
+            name: "native_video_player/visibility",
             binaryMessenger: messenger
         )
 
@@ -584,6 +596,82 @@ import QuartzCore
     var inlineDisplayView: UIView {
         if usesTextureView { return texturePlaceholderView }
         return lightView ?? playerViewController.view
+    }
+
+    /// Whether the whole inline surface lies on screen. Flutter's clips are
+    /// invisible here (a tile half under the app bar is still inside the
+    /// window); queryFullyVisible asks Dart for those.
+    var isInlineSurfaceOnScreen: Bool {
+        let surface = inlineDisplayView
+        guard let window = surface.window, !surface.isHidden, surface.alpha > 0,
+              surface.bounds.width > 0, surface.bounds.height > 0 else { return false }
+        let frame = surface.convert(surface.bounds, to: window)
+        return window.bounds.insetBy(dx: -2, dy: -2).contains(frame)
+    }
+
+    // Where detachInlineSurfaceUntilPipStops took the surface from.
+    private weak var detachedSurfaceSuperview: UIView?
+    private var detachedSurfaceFrame: CGRect = .zero
+
+    /// Takes the inline surface out of the window right before the PiP
+    /// window closes: AVKit then closes it in place. It flies back to the
+    /// layer even when the restore is declined or the view is hidden.
+    func detachInlineSurfaceUntilPipStops() {
+        let surface = inlineDisplayView
+        guard let superview = surface.superview else { return }
+        detachedSurfaceSuperview = superview
+        detachedSurfaceFrame = surface.frame
+        surface.removeFromSuperview()
+        // A tile scrolled off screen is already out of the window (Flutter
+        // removes platform views it doesn't composite), and AVKit flew to
+        // where it last saw the layer, off screen. Leaving a window just
+        // before the stop is what makes it close in place, so pass the
+        // surface through the window once, unseen.
+        if superview.window == nil, let window = UIApplication.shared.sceneKeyWindow {
+            npLog("ℹ️ Passing view \(viewId) through the window before PiP stops")
+            surface.alpha = 0
+            window.addSubview(surface)
+            window.layoutIfNeeded()
+            CATransaction.flush()
+            surface.removeFromSuperview()
+        }
+    }
+
+    /// Puts back a surface taken out by detachInlineSurfaceUntilPipStops,
+    /// unless Flutter gave it another place meanwhile.
+    func reattachInlineSurface() {
+        guard let superview = detachedSurfaceSuperview else { return }
+        detachedSurfaceSuperview = nil
+        let surface = inlineDisplayView
+        guard surface.superview == nil else { return }
+        surface.frame = detachedSurfaceFrame
+        superview.addSubview(surface)
+    }
+
+    /// Answers whether this view is painted whole: on screen and not cut by
+    /// a Flutter clip (a scrolled list, a clip widget), as the Dart widget
+    /// sees it. A closing PiP window only flies back into a view that is:
+    /// AVKit animates to the view's whole frame above everything Flutter
+    /// draws. Without an answer within 300 ms it is not.
+    func queryFullyVisible(_ completion: @escaping (Bool) -> Void) {
+        guard isInlineSurfaceOnScreen else {
+            completion(false)
+            return
+        }
+        var answered = false
+        let answer: (Bool) -> Void = { visible in
+            guard !answered else { return }
+            answered = true
+            completion(visible)
+        }
+        visibilityChannel.invokeMethod("isViewFullyVisible", arguments: ["viewId": viewId]) { result in
+            answer(result as? Bool ?? false)
+        }
+        let viewId = self.viewId
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            if !answered { npLog("⚠️ No visibility answer for view \(viewId) in time") }
+            answer(false)
+        }
     }
 
     /// Makes the inline surface visible (used around PiP transitions).
