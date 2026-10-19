@@ -74,6 +74,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pauses and does not call it.
 
 ### Fixed
+- **Android: remote videos fail in release builds of apps without the
+  INTERNET permission.** Flutter adds it to debug builds only, so a release
+  build got "Source error" (`getaddrinfo EPERM`) for every stream. The
+  plugin's manifest now declares it.
 - **iOS: seeking in a live stream jumped to the start of its DVR window.**
   Live positions are reported relative to the window, but `seekTo` took them
   as absolute stream times. The buffered position was absolute too.

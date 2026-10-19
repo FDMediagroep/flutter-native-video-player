@@ -251,6 +251,9 @@ class _ShowcaseHomeState extends State<ShowcaseHome> {
           'https://peach.blender.org/wp-content/uploads/title_anouncement.jpg',
     ),
     fullscreenFlightBorderRadius: BorderRadius.circular(20),
+    // Fullscreen follows the phone: portrait stays portrait (swipe down to
+    // close), turn it sideways for landscape.
+    lockToLandscape: false,
   );
   late final analytics = PlaybackAnalytics(hero);
   late final backgroundGuard = BackgroundPlaybackGuard(
@@ -727,6 +730,8 @@ class _LiveTabState extends State<LiveTab> {
   Future<void> _tune(Film channel) async {
     setState(() => _channel = channel);
     await _controller.initialize();
+    // Live TV keeps its controls up: the LIVE pill is always one tap away.
+    _controller.lockOverlay();
     await _controller.load(url: channel.url, force: true);
   }
 
@@ -1297,7 +1302,9 @@ class _ScrubberState extends State<Scrubber> {
       0.0,
       max,
     );
-    final atLiveEdge = c.isLive && c.liveEdgeOffset.inSeconds < 10;
+    // While dragging, show where the drag lands rather than where it plays.
+    final behind = Duration(milliseconds: (max - position).round());
+    final atLiveEdge = c.isLive && behind.inSeconds < 10;
     const labelStyle = TextStyle(
       color: Colors.white,
       fontSize: 12,
@@ -1338,7 +1345,7 @@ class _ScrubberState extends State<Scrubber> {
                 if (c.isLive)
                   _LivePill(
                     atEdge: atLiveEdge,
-                    behind: c.liveEdgeOffset,
+                    behind: behind,
                     onTap: c.seekToLiveEdge,
                   )
                 else

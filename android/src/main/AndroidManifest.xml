@@ -8,6 +8,10 @@
             android:foregroundServiceType="mediaPlayback" />
     </application>
 
+    <!-- Streams, license servers, Cast and downloads go over the network.
+         Flutter only adds this to debug builds, so without it a release app
+         fails every remote source with "Source error" (getaddrinfo EPERM). -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- Required for media playback -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
