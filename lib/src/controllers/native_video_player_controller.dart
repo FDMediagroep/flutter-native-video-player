@@ -2165,7 +2165,7 @@ class NativeVideoPlayerController {
           _updateState(_state.copyWith(isPipEnabled: inPip));
 
           if (!inPip) {
-            unawaited(_pauseIfPipDismissed());
+            unawaited(_handleAndroidPipExit());
           }
         }
       }
@@ -2196,31 +2196,22 @@ class NativeVideoPlayerController {
   /// touch, so waiting for `resumed` misread an expand as a dismiss. Only a
   /// lifecycle that reports the app hidden (`hidden`/`paused`) means the
   /// window was dismissed.
-  Future<void> _pauseIfPipDismissed() async {
-    const Duration pollInterval = Duration(milliseconds: 100);
-    const Duration dismissTimeout = Duration(seconds: 3);
-
-    final Stopwatch stopwatch = Stopwatch()..start();
-    while (stopwatch.elapsed < dismissTimeout) {
-      if (_isDisposed || _state.isPipEnabled) {
-        return;
-      }
-      switch (WidgetsBinding.instance.lifecycleState) {
-        case AppLifecycleState.resumed:
-          return;
-        case AppLifecycleState.hidden:
-        case AppLifecycleState.paused:
-        case AppLifecycleState.detached:
-          debugPrint(
-            'PiP window dismissed while app is backgrounded — pausing',
-          );
-          await pause();
-          return;
-        case AppLifecycleState.inactive:
-        case null:
-          break;
-      }
-      await Future<void>.delayed(pollInterval);
+  ///
+  /// An expand calls [onPictureInPictureRestore] instead: the same handler
+  /// an app sets for iOS, where the window outlives its screen.
+  Future<void> _handleAndroidPipExit() async {
+    final AndroidPipExit exit = await PipRestore.classifyAndroidPipExit(
+      lifecycle: () => WidgetsBinding.instance.lifecycleState,
+      isStillOutOfPip: () => !_isDisposed && !_state.isPipEnabled,
+    );
+    switch (exit) {
+      case AndroidPipExit.dismissed:
+        debugPrint('PiP window dismissed while app is backgrounded — pausing');
+        await pause();
+      case AndroidPipExit.expanded:
+        await PipRestore.callHandler(id);
+      case AndroidPipExit.undecided:
+        break;
     }
   }
 
@@ -2376,11 +2367,12 @@ class NativeVideoPlayerController {
     return await _methodChannel!.enterPictureInPicture();
   }
 
-  /// Called on iOS when the user taps the button in the Picture-in-Picture
-  /// window that returns to the app, to open the screen the video belongs
-  /// to (its screen may have closed while the window was open).
+  /// Called when the user takes the Picture-in-Picture window back into the
+  /// app, to open the screen the video belongs to (on iOS its screen may
+  /// have closed while the window was open).
   ///
-  /// The window waits while the handler runs (at most 1.5 s) and then until
+  /// iOS (the window's "back to app" button): the window waits while the
+  /// handler runs (at most 1.5 s) and then until
   /// a player of this controller is fully visible: built, on the top route
   /// with its transition done, and not cut off by a scroll view or the
   /// screen edge (at most 1 s more). It then flies into that player; without
@@ -2389,10 +2381,14 @@ class NativeVideoPlayerController {
   /// popped. Check [isPlayerFullyVisible] first to skip navigating when the
   /// player already shows.
   ///
+  /// Android (the window expanded back into the app): the whole activity was
+  /// the window, so the app comes back as it was, normally still on this
+  /// player's fullscreen. Called once the app is back, which on devices that
+  /// only report it on the next touch takes up to 3 s; nothing waits for it.
+  ///
   /// Not called when the window closes through [exitPictureInPicture] or
   /// [dispose], nor when the user closes it with its X. Controllers sharing
-  /// an [id] share one window: the handler set last is used. Android brings
-  /// back the whole activity instead and does not call it.
+  /// an [id] share one window: the handler set last is used.
   FutureOr<void> Function()? get onPictureInPictureRestore =>
       _onPictureInPictureRestore;
   set onPictureInPictureRestore(FutureOr<void> Function()? handler) {

@@ -481,11 +481,13 @@ _controller = NativeVideoPlayerController(
 );
 ```
 
-**Back to the video's screen (iOS):** the PiP window outlives the screen
+**Back to the video's screen:** on iOS the PiP window outlives the screen
 that opened it. When the user taps its "back to app" button,
 `onPictureInPictureRestore` can open that screen again. The window waits for
 the handler and for the player to be fully visible, then flies into it (or
-closes in place when no player shows in time):
+closes in place when no player shows in time). On Android, expanding the
+window calls the same handler once the app is back; the whole app was the
+window there, so it usually still shows the player and nothing waits:
 
 ```dart
 _controller.onPictureInPictureRestore = () {

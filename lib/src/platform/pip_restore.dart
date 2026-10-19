@@ -1,17 +1,32 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 
 import 'view_visibility.dart';
 
-/// Runs the app's `onPictureInPictureRestore` handler when the user taps the
-/// button in the PiP window that returns to the app (iOS).
+/// How an Android Picture-in-Picture window ended (see
+/// [PipRestore.classifyAndroidPipExit]).
+enum AndroidPipExit {
+  /// Expanded back into the app.
+  expanded,
+
+  /// Closed with its X: the app went to the background.
+  dismissed,
+
+  /// PiP came back, or the controller went, before it was clear.
+  undecided,
+}
+
+/// Runs the app's `onPictureInPictureRestore` handler when the user takes
+/// the PiP window back into the app.
 ///
-/// AVKit asks the native side to restore the app's UI and waits for its
+/// iOS: AVKit asks the native side to restore the app's UI and waits for its
 /// answer before the window animates. The native side asks here; the reply
 /// comes once the handler has opened the screen and a player of the
 /// controller is fully visible, so the window flies into that player.
+/// Android: the controller calls [callHandler] when the window was expanded
+/// (see [classifyAndroidPipExit]); nothing waits.
 class PipRestore {
   PipRestore._();
 
@@ -54,6 +69,59 @@ class PipRestore {
     if (handler != null && identical(_handlers[controllerId], handler)) {
       _handlers.remove(controllerId);
     }
+  }
+
+  /// Calls the handler for [controllerId], if any, without waiting for a
+  /// player (Android: the window was expanded and the app is already back).
+  static Future<void> callHandler(int controllerId) async {
+    final FutureOr<void> Function()? handler = _handlers[controllerId];
+    if (handler == null) {
+      return;
+    }
+    try {
+      await Future<void>.sync(handler);
+    } catch (e) {
+      debugPrint('NativeVideoPlayer: onPictureInPictureRestore failed: $e');
+    }
+  }
+
+  /// Tells how an Android PiP window ended, once the PiP flag went off.
+  ///
+  /// Android reports neither a tap on the window's expand button nor its X.
+  /// Expanding brings the app back: `resumed`, or `inactive` until its window
+  /// regains focus, which on some devices only happens on the next touch.
+  /// Closing stops the activity: a lifecycle that reports the app hidden
+  /// (`hidden`/`paused`). Still `inactive` after [timeout] counts as
+  /// expanded. [isStillOutOfPip] going false (PiP again, or the controller
+  /// disposed) ends the wait with [AndroidPipExit.undecided].
+  static Future<AndroidPipExit> classifyAndroidPipExit({
+    required AppLifecycleState? Function() lifecycle,
+    required bool Function() isStillOutOfPip,
+    Duration timeout = const Duration(seconds: 3),
+    Duration pollInterval = const Duration(milliseconds: 100),
+  }) async {
+    Duration waited = Duration.zero;
+    while (waited < timeout) {
+      if (!isStillOutOfPip()) {
+        return AndroidPipExit.undecided;
+      }
+      switch (lifecycle()) {
+        case AppLifecycleState.resumed:
+          return AndroidPipExit.expanded;
+        case AppLifecycleState.hidden:
+        case AppLifecycleState.paused:
+        case AppLifecycleState.detached:
+          return AndroidPipExit.dismissed;
+        case AppLifecycleState.inactive:
+        case null:
+          break;
+      }
+      await Future<void>.delayed(pollInterval);
+      waited += pollInterval;
+    }
+    return isStillOutOfPip()
+        ? AndroidPipExit.expanded
+        : AndroidPipExit.undecided;
   }
 
   static Future<Object?> _handle(MethodCall call) async {

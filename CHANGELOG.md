@@ -46,6 +46,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   black box.
 - `NativeVideoPlayerController.capturePosterFrame()` / `posterFrame` (iOS):
   a JPEG of the frame the player shows, from the item's video output.
+- **Android: `onPictureInPictureRestore` on expand.** Expanding the PiP
+  window back into the app now calls the same handler, so one handler serves
+  both platforms. Android's window is the whole activity, so the app comes
+  back as it was (normally on the player's fullscreen) and nothing waits for
+  the handler; it runs once the app is back, up to 3 s later on devices that
+  report it only on the next touch. Closing the window with its X still
+  pauses and does not call it.
 
 ### Fixed
 - **iOS: a tile scrolled back while its PiP window is open plays the video
