@@ -4,6 +4,26 @@ version: 1.6.7
 homepage: https://github.com/plug-and-pay/flutter-native-video-player
 repository: https://github.com/plug-and-pay/flutter-native-video-player.git
 issue_tracker: https://github.com/plug-and-pay/flutter-native-video-player/issues
+topics:
+  - video
+  - video-player
+  - hls
+  - chromecast
+  - airplay
+
+screenshots:
+  - description: A poster with an animated preview over the native player, with custom Flutter controls.
+    path: doc/screenshots/watch.webp
+  - description: Playing HLS with custom controls, quality, captions, PiP, AirPlay and Cast in reach.
+    path: doc/screenshots/playing.webp
+  - description: Sidecar captions, rendered and styled by Flutter.
+    path: doc/screenshots/captions.webp
+  - description: Live HLS with a DVR scrubber and a jump-to-live button.
+    path: doc/screenshots/live.webp
+  - description: A video feed with posters, duration badges and offline downloads.
+    path: doc/screenshots/feed.webp
+  - description: A playlist with auto-advance and remembered resume positions.
+    path: doc/screenshots/playlist.webp
 
 environment:
   sdk: ">=3.9.0 <4.0.0"
