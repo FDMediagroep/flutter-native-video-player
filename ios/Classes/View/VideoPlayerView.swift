@@ -60,6 +60,10 @@ import QuartzCore
     // queryFullyVisible). Only invoked from here; Dart answers.
     let visibilityChannel: FlutterMethodChannel
 
+    // Asks the Dart side to restore the app's UI for a closing PiP window
+    // (see handlePipRestoreRequest). Only invoked from here; Dart answers.
+    let pipChannel: FlutterMethodChannel
+
     // The sink lives in its own object so sendEvent's main-queue block can
     // hold it instead of the view: a block that retains the view keeps a
     // dangling pointer when it is created while the view deallocates
@@ -114,6 +118,11 @@ import QuartzCore
     // Set when the PiP window closed without flying back because this view
     // was off screen: didStop then plays on if the player was playing.
     var playOnAfterPipStop = false
+
+    // Set when the app (or the plugin) closes the PiP window from code: AVKit
+    // asks to restore then too, but only a tap on the window's button goes
+    // to the app's onPictureInPictureRestore handler.
+    var pipStopRequestedByCode = false
 
     // Track if we've already registered remote command handlers
     // This prevents re-registering and clearing targets unnecessarily
@@ -252,6 +261,10 @@ import QuartzCore
         )
         visibilityChannel = FlutterMethodChannel(
             name: "native_video_player/visibility",
+            binaryMessenger: messenger
+        )
+        pipChannel = FlutterMethodChannel(
+            name: "native_video_player/pip",
             binaryMessenger: messenger
         )
 
@@ -1210,6 +1223,7 @@ import QuartzCore
         if isPipActiveNow {
             if #available(iOS 14.0, *) {
                 if let pipCtrl = pipController, pipCtrl.isPictureInPictureActive {
+                    pipStopRequestedByCode = true
                     pipCtrl.stopPictureInPicture()
                 }
             }

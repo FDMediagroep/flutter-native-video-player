@@ -117,6 +117,21 @@ extension VideoPlayerView: AVPlayerViewControllerDelegate {
 
         // Mark PiP as inactive
         isPipCurrentlyActive = false
+        pipStopRequestedByCode = false
+
+        // The restore delegate set this (see the custom controller's didStop)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.isPipRestoringUI = false
+        }
+        reattachInlineSurface()
+        setInlineViewVisible()
+        if playOnAfterPipStop {
+            playOnAfterPipStop = false
+            if player?.rate == 0 {
+                npLog("   → Playing on in view \(viewId)")
+                player?.play()
+            }
+        }
 
         // Clear manual PiP flag if this was a manual PiP session
         if wasManualPiP, let controllerIdValue = controllerId {
@@ -184,6 +199,11 @@ extension VideoPlayerView: AVPlayerViewControllerDelegate {
         }
 
         releaseIfKeptForPip()
+    }
+
+    // Automatic PiP: the same restore path as the manual one (handlePipRestoreRequest).
+    public func playerViewController(_ playerViewController: AVPlayerViewController, restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
+        handlePipRestoreRequest(completionHandler)
     }
 
     public func playerViewController(_ playerViewController: AVPlayerViewController, failedToStartPictureInPictureWithError error: Error) {
@@ -363,6 +383,7 @@ extension VideoPlayerView: AVPictureInPictureControllerDelegate {
 
         // Mark PiP as inactive
         isPipCurrentlyActive = false
+        pipStopRequestedByCode = false
 
         // Clear the restoration flag after a delay to allow any pending view disposals to complete
         // This ensures cleanupRemoteCommandOwnership sees the flag during the disposal
@@ -524,6 +545,48 @@ extension VideoPlayerView: AVPictureInPictureControllerDelegate {
     }
     
     public func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
+        handlePipRestoreRequest(completionHandler)
+    }
+
+    /// The PiP window is closing back into the app: the user tapped its
+    /// button, or the app closed it. A tap first goes to the app's
+    /// `onPictureInPictureRestore` handler, which can open the screen the
+    /// video belongs to. AVKit waits for the completion handler before it
+    /// animates, so the window can fly into that screen's player: the view
+    /// created there owns the window by then (takeOverPipWindow).
+    func handlePipRestoreRequest(_ completionHandler: @escaping (Bool) -> Void) {
+        let requestedByCode = pipStopRequestedByCode
+        pipStopRequestedByCode = false
+        guard !requestedByCode, let controllerIdValue = controllerId else {
+            restorePipUserInterface(completionHandler)
+            return
+        }
+
+        npLog("🎬 PiP restore requested from the window on view \(viewId) - asking the app")
+        var answered = false
+        let proceed: () -> Void = { [weak self] in
+            guard !answered else { return }
+            answered = true
+            let owner = SharedPlayerManager.shared.findAllViewsForController(controllerIdValue)
+                .first { $0.isPipCurrentlyActive } ?? self
+            if let owner = owner {
+                owner.restorePipUserInterface(completionHandler)
+            } else {
+                completionHandler(false)
+            }
+        }
+        pipChannel.invokeMethod("restoreUserInterface", arguments: ["controllerId": controllerIdValue]) { _ in
+            proceed()
+        }
+        // The Dart side caps the app's handler and its wait for the player
+        // (2.5 s together); this is the backstop when Dart does not answer.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            if !answered { npLog("⚠️ No answer to the PiP restore request in time") }
+            proceed()
+        }
+    }
+
+    func restorePipUserInterface(_ completionHandler: @escaping (Bool) -> Void) {
         npLog("🎬 Restoring UI from PiP on view \(viewId)")
 
         // CRITICAL: Mark that we're restoring UI from PiP

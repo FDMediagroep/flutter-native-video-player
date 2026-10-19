@@ -485,6 +485,7 @@ class SharedPlayerManager: NSObject {
                 // A PiP window (also one of a view kept after its screen
                 // closed) must not stay open on a released player.
                 if let pipController = view.pipController, pipController.isPictureInPictureActive {
+                    view.pipStopRequestedByCode = true
                     pipController.stopPictureInPicture()
                 }
                 npLog("🧹 [SharedPlayerManager] Clearing player from view \(viewId) for controllerId: \(controllerId)")

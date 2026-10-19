@@ -72,7 +72,7 @@ void main() {
 
   testWidgets('answers the native query by view id', (tester) async {
     await pumpFeed(tester);
-    ViewVisibility.register(7, tile.currentContext!);
+    ViewVisibility.register(7, tile.currentContext!, controllerId: 70);
 
     Future<Object?> ask(int viewId) async {
       final ByteData? reply = await tester.binding.defaultBinaryMessenger

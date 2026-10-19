@@ -481,6 +481,24 @@ _controller = NativeVideoPlayerController(
 );
 ```
 
+**Back to the video's screen (iOS):** the PiP window outlives the screen
+that opened it. When the user taps its "back to app" button,
+`onPictureInPictureRestore` can open that screen again. The window waits for
+the handler and for the player to be fully visible, then flies into it (or
+closes in place when no player shows in time):
+
+```dart
+_controller.onPictureInPictureRestore = () {
+  if (_controller.isPlayerFullyVisible) return; // already on screen
+  // Start the navigation, don't await it (a push completes on pop).
+  router.navigate(VideoRoute(id: videoId));
+};
+```
+
+Keep the controller alive while the window is open (for example in the
+feed's state, not in the screen's widget), so the handler is still there.
+The screen you open builds a `NativeVideoPlayer` with the same controller.
+
 #### Playback Controls
 
 ```dart

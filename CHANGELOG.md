@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **iOS: `onPictureInPictureRestore`, to open the video's screen from the
+  PiP window.** Called when the user taps the window's "back to app" button
+  (not for `exitPictureInPicture()`, `dispose()` or the window's X). The
+  window waits for the handler (at most 1.5 s) and then until a player of
+  the controller is fully visible (at most 1 s more), and flies into it; the
+  player a newly opened screen builds takes over the window. Also
+  `isPlayerFullyVisible`, to skip navigating when the player already shows.
+  A player under a pushed page or dialog, or whose route is still
+  animating, no longer counts as fully visible, so the window also closes in
+  place instead of flying over that page. Automatic PiP restores through the
+  same path now.
+
 ### Fixed
 - **iOS: a tile scrolled back while its PiP window is open plays the video
   next to the window.** Scrolling a feed tile far enough disposes its platform

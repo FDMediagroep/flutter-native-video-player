@@ -267,7 +267,7 @@ class _NativeVideoPlayerState extends State<NativeVideoPlayer>
   /// Called when the platform view is created
   Future<void> _onPlatformViewCreated(int id) async {
     _platformViewId = id;
-    ViewVisibility.register(id, context);
+    ViewVisibility.register(id, context, controllerId: widget.controller.id);
     if (widget.isFullscreenContext) {
       widget.controller.registerFullscreenView(id);
     }

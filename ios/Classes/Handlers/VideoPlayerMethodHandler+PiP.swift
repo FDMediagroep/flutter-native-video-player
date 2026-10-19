@@ -291,6 +291,7 @@ extension VideoPlayerView {
                     // By the time AVKit asks to restore, it has picked where
                     // to fly: take a surface that is not fully visible out
                     // of the window before stopping (see the restore delegate).
+                    pipStopRequestedByCode = true
                     queryFullyVisible { [weak self] visible in
                         if !visible, let self = self {
                             npLog("ℹ️ View \(self.viewId) is not fully visible - detaching it before PiP stops")
@@ -313,6 +314,7 @@ extension VideoPlayerView {
                     if let otherPipController = view.pipController,
                        otherPipController.isPictureInPictureActive {
                         npLog("🛑 Found active PiP on view \(view.viewId), stopping it")
+                        view.pipStopRequestedByCode = true
                         otherPipController.stopPictureInPicture()
                         result(true)
                         return

@@ -21,7 +21,9 @@ import '../models/native_video_player_subtitle_track.dart';
 import '../models/native_video_player_video_size.dart';
 import '../platform/native_event_subscription.dart';
 import '../platform/platform_utils.dart';
+import '../platform/pip_restore.dart';
 import '../platform/video_player_method_channel.dart';
+import '../platform/view_visibility.dart';
 import '../services/airplay_state_manager.dart';
 import '../services/playback_coordinator.dart';
 import '../subtitles/sidecar_subtitle_engine.dart';
@@ -2280,6 +2282,40 @@ class NativeVideoPlayerController {
     return await _methodChannel!.enterPictureInPicture();
   }
 
+  /// Called on iOS when the user taps the button in the Picture-in-Picture
+  /// window that returns to the app, to open the screen the video belongs
+  /// to (its screen may have closed while the window was open).
+  ///
+  /// The window waits while the handler runs (at most 1.5 s) and then until
+  /// a player of this controller is fully visible: built, on the top route
+  /// with its transition done, and not cut off by a scroll view or the
+  /// screen edge (at most 1 s more). It then flies into that player; without
+  /// one it closes in place and the video plays on. Start the navigation and
+  /// return: don't await a push whose future completes when the route is
+  /// popped. Check [isPlayerFullyVisible] first to skip navigating when the
+  /// player already shows.
+  ///
+  /// Not called when the window closes through [exitPictureInPicture] or
+  /// [dispose], nor when the user closes it with its X. Controllers sharing
+  /// an [id] share one window: the handler set last is used. Android brings
+  /// back the whole activity instead and does not call it.
+  FutureOr<void> Function()? get onPictureInPictureRestore =>
+      _onPictureInPictureRestore;
+  set onPictureInPictureRestore(FutureOr<void> Function()? handler) {
+    PipRestore.clearHandler(id, _onPictureInPictureRestore);
+    _onPictureInPictureRestore = handler;
+    if (handler != null) {
+      PipRestore.setHandler(id, handler);
+    }
+  }
+
+  FutureOr<void> Function()? _onPictureInPictureRestore;
+
+  /// Whether a player of this controller is fully visible: on the top route
+  /// with its transition done, and not cut off by a scroll view, a clip or
+  /// the screen edge.
+  bool get isPlayerFullyVisible => ViewVisibility.isControllerFullyVisible(id);
+
   /// Exits Picture-in-Picture mode
   /// Only works on iOS 14+ and Android 8+
   Future<bool> exitPictureInPicture() async {
@@ -2782,6 +2818,9 @@ class NativeVideoPlayerController {
 
     // Mark as disposed immediately to prevent new events from being added
     _isDisposed = true;
+
+    PipRestore.clearHandler(id, _onPictureInPictureRestore);
+    _onPictureInPictureRestore = null;
 
     // Stop the Android PiP status poll.
     _androidPipPollTimer?.cancel();
