@@ -28,6 +28,10 @@ You get everything the platform players are good at (HLS, DRM, Picture-in-Pictur
     <td align="center"><img src="https://raw.githubusercontent.com/plug-and-pay/flutter-native-video-player/master/doc/media/airplay.webp" width="300" alt="Sending the video to an Apple TV with AirPlay"><br><sub><b>AirPlay</b><br>to Apple TV and AirPlay speakers</sub></td>
     <td align="center"><img src="https://raw.githubusercontent.com/plug-and-pay/flutter-native-video-player/master/doc/screenshots/captions.webp" width="300" alt="Styled sidecar captions over the video"><br><sub><b>Captions</b><br>embedded tracks and styleable VTT/SRT</sub></td>
   </tr>
+  <tr>
+    <td align="center"><img src="https://raw.githubusercontent.com/plug-and-pay/flutter-native-video-player/master/doc/screenshots/lock_screen.webp" width="300" alt="Now Playing on the iOS lock screen with artwork and controls"><br><sub><b>Lock screen & background</b><br>artwork, title and controls, keeps playing</sub></td>
+    <td align="center"><img src="https://raw.githubusercontent.com/plug-and-pay/flutter-native-video-player/master/doc/screenshots/feed.webp" width="300" alt="A feed of videos with posters and duration badges"><br><sub><b>Built for feeds</b><br>posters, badges, offline downloads</sub></td>
+  </tr>
 </table>
 
 All of this is one file: [`example/lib/main.dart`](example/lib/main.dart). Run it with `cd example && flutter run`.
@@ -515,7 +519,9 @@ For a live stream pass `streamType: 'LIVE'` to `loadMedia`. The receiver fetches
 
 ## Background playback & lock screen
 
-Videos keep playing in the background, with Control Center (iOS) and a media notification (Android). Give them a title and artwork:
+Videos keep playing in the background, with Control Center and the lock screen on iOS and a media notification on Android. Give them a title and artwork:
+
+<img src="https://raw.githubusercontent.com/plug-and-pay/flutter-native-video-player/master/doc/screenshots/lock_screen.webp" width="300" alt="Now Playing on the iOS lock screen">
 
 ```dart
 NativeVideoPlayerController(
