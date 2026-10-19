@@ -1280,33 +1280,36 @@ class CinemaControls extends StatelessWidget {
                         left: 10,
                         right: 4,
                         bottom: 2,
-                        child: Row(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Expanded(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  if (!compact) _ChapterChip(controller: c),
-                                  Scrubber(
+                            // Above the row, so the bar and the buttons
+                            // share one center line.
+                            if (!compact) _ChapterChip(controller: c),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Scrubber(
                                     controller: c,
                                     storyboard: storyboard,
                                   ),
-                                ],
-                              ),
-                            ),
-                            if (compact)
-                              _RoundIcon(
-                                icon: c.volume == 0
-                                    ? Icons.volume_off_rounded
-                                    : Icons.volume_up_rounded,
-                                onTap: () => c.setVolume(c.volume == 0 ? 1 : 0),
-                              ),
-                            _RoundIcon(
-                              icon: c.isFullScreen
-                                  ? Icons.fullscreen_exit_rounded
-                                  : Icons.fullscreen_rounded,
-                              onTap: c.toggleFullScreen,
+                                ),
+                                if (compact)
+                                  _RoundIcon(
+                                    icon: c.volume == 0
+                                        ? Icons.volume_off_rounded
+                                        : Icons.volume_up_rounded,
+                                    onTap: () =>
+                                        c.setVolume(c.volume == 0 ? 1 : 0),
+                                  ),
+                                _RoundIcon(
+                                  icon: c.isFullScreen
+                                      ? Icons.fullscreen_exit_rounded
+                                      : Icons.fullscreen_rounded,
+                                  onTap: c.toggleFullScreen,
+                                ),
+                              ],
                             ),
                           ],
                         ),
