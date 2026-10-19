@@ -169,9 +169,14 @@ class StoryboardThumbnails {
     );
   }
 
-  /// Downloads and parses a storyboard VTT from [url].
-  static Future<StoryboardThumbnails> fromUrl(String url) async {
-    final content = await SubtitleLoader.loadUrl(url);
+  /// Downloads and parses a storyboard VTT from [url], sending [headers]
+  /// (e.g. a `Referer` for a CDN with hotlink protection). Throws when the
+  /// download fails.
+  static Future<StoryboardThumbnails> fromUrl(
+    String url, {
+    Map<String, String>? headers,
+  }) async {
+    final content = await SubtitleLoader.loadUrl(url, headers: headers);
     return StoryboardThumbnails.parseVtt(content, baseUrl: Uri.parse(url));
   }
 
@@ -195,5 +200,28 @@ class StoryboardThumbnails {
       }
     }
     return match == -1 ? null : entries[match];
+  }
+
+  /// The distinct image URLs nearest to [position], at most [limit], the
+  /// one at [position] first, then alternating forward and back. What a
+  /// scrub bar precaches so the frame is there before the finger is.
+  List<String> imageUrlsAround(Duration position, {int limit = 4}) {
+    if (entries.isEmpty || limit <= 0) return const [];
+    final urls = <String>[];
+    final at = thumbnailAt(position);
+    final center = at == null ? 0 : entries.indexOf(at);
+    void take(int i) {
+      final url = entries[i].url;
+      if (!urls.contains(url)) urls.add(url);
+    }
+
+    take(center);
+    var forward = center + 1;
+    var back = center - 1;
+    while (urls.length < limit && (forward < entries.length || back >= 0)) {
+      if (forward < entries.length) take(forward++);
+      if (urls.length < limit && back >= 0) take(back--);
+    }
+    return urls.length > limit ? urls.sublist(0, limit) : urls;
   }
 }

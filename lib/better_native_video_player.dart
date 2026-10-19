@@ -11,6 +11,9 @@
 /// - Background playback with media notifications
 library;
 
+export 'src/chapters/native_video_player_chapters.dart';
+export 'src/chapters/native_video_player_progress_bar.dart';
+export 'src/chapters/native_video_player_scrub_preview.dart';
 export 'src/config/native_video_player_config.dart';
 export 'src/controllers/native_video_player_controller.dart';
 export 'src/enums/native_video_player_event.dart';
@@ -18,6 +21,7 @@ export 'src/fullscreen/fullscreen_hero_transition.dart';
 export 'src/fullscreen/fullscreen_manager.dart';
 export 'src/fullscreen/fullscreen_video_player.dart';
 export 'src/models/native_video_player_audio_track.dart';
+export 'src/models/native_video_player_chapter.dart';
 export 'src/models/native_video_player_download.dart';
 export 'src/models/native_video_player_media_info.dart';
 export 'src/models/native_video_player_playback_range.dart';

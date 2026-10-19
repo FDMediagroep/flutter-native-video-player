@@ -11,7 +11,9 @@ import '../enums/native_video_player_event.dart';
 import '../fullscreen/fullscreen_hero_transition.dart';
 import '../fullscreen/fullscreen_manager.dart';
 import '../fullscreen/fullscreen_video_player.dart';
+import '../chapters/native_video_player_chapters.dart';
 import '../models/native_video_player_audio_track.dart';
+import '../models/native_video_player_chapter.dart';
 import '../models/native_video_player_media_info.dart';
 import '../models/native_video_player_playback_range.dart';
 import '../models/native_video_player_quality.dart';
@@ -521,6 +523,10 @@ class NativeVideoPlayerController {
       StreamController<NativeVideoPlayerQuality>.broadcast();
   final StreamController<List<NativeVideoPlayerQuality>> _qualitiesController =
       StreamController<List<NativeVideoPlayerQuality>>.broadcast();
+  final StreamController<List<NativeVideoPlayerChapter>> _chaptersController =
+      StreamController<List<NativeVideoPlayerChapter>>.broadcast();
+  final StreamController<NativeVideoPlayerChapter?> _currentChapterController =
+      StreamController<NativeVideoPlayerChapter?>.broadcast();
 
   /// Updates the internal state
   void _updateState(NativeVideoPlayerState newState) {
@@ -656,6 +662,14 @@ class NativeVideoPlayerController {
       if (!_isLiveController.isClosed) {
         _isLiveController.add(newState.isLive);
       }
+      // Chapters are hidden for live streams.
+      if (_chapters.isNotEmpty && !_chaptersController.isClosed) {
+        _chaptersController.add(chapters);
+      }
+    }
+    if (oldState.currentPosition != newState.currentPosition ||
+        oldState.isLive != newState.isLive) {
+      _updateCurrentChapter();
     }
   }
 
@@ -1711,6 +1725,10 @@ class NativeVideoPlayerController {
   /// position is applied natively before the first frame, so there is no
   /// visible seek after playback starts.
   ///
+  /// [chapters] sets the video's chapters (see [setChapters]). Without it,
+  /// chapters set earlier are kept for the same URL and cleared for a
+  /// different one.
+  ///
   /// [force] loads even when the current state is `loaded` (the guard that
   /// prevents accidental double-loads). Use it to replace the current video
   /// with a different one, e.g. for playlist advancement.
@@ -1720,9 +1738,11 @@ class NativeVideoPlayerController {
     Map<String, dynamic>? drmConfig,
     List<NativeVideoPlayerSidecarSubtitle>? sidecarSubtitles,
     Duration? startAt,
+    List<NativeVideoPlayerChapter>? chapters,
     bool force = false,
   }) async {
     if (!force && _state.activityState.isLoaded) {
+      if (chapters != null) setChapters(chapters);
       return;
     }
 
@@ -1742,7 +1762,16 @@ class NativeVideoPlayerController {
       );
     }
 
+    final previousUrl = _url;
     _url = url;
+
+    // Chapters belong to a video: replace them with the ones passed, or
+    // drop them when a different video loads.
+    if (chapters != null) {
+      setChapters(chapters);
+    } else if (previousUrl != null && previousUrl != url) {
+      setChapters(const []);
+    }
 
     // Retained for the eviction re-load (see _reloadEvictedSource).
     _lastLoadHeaders = headers;
@@ -1870,6 +1899,7 @@ class NativeVideoPlayerController {
     Map<String, String>? headers,
     Map<String, dynamic>? drmConfig,
     Duration? startAt,
+    List<NativeVideoPlayerChapter>? chapters,
     bool force = false,
   }) async {
     return load(
@@ -1877,6 +1907,7 @@ class NativeVideoPlayerController {
       headers: headers,
       drmConfig: drmConfig,
       startAt: startAt,
+      chapters: chapters,
       force: force,
     );
   }
@@ -2019,6 +2050,90 @@ class NativeVideoPlayerController {
   Future<void> seekToLiveEdge() async {
     _pendingSeekTarget = null;
     await _methodChannel?.seekToLiveEdge();
+  }
+
+  /// The video's chapters, sorted by start. Empty when none are set and
+  /// while a live stream plays (chapters are hidden for live).
+  List<NativeVideoPlayerChapter> get chapters =>
+      _state.isLive ? const [] : _chapters;
+  List<NativeVideoPlayerChapter> _chapters = const [];
+
+  /// Emits [chapters] whenever they change.
+  Stream<List<NativeVideoPlayerChapter>> get chaptersStream =>
+      _chaptersController.stream;
+
+  /// The chapter at [currentPosition], or null without chapters, before
+  /// the first one starts, and for live streams.
+  NativeVideoPlayerChapter? get currentChapter => _currentChapter;
+  NativeVideoPlayerChapter? _currentChapter;
+
+  /// Emits [currentChapter] whenever playback crosses into another chapter
+  /// (or the chapters change).
+  Stream<NativeVideoPlayerChapter?> get currentChapterStream =>
+      _currentChapterController.stream;
+
+  /// Sets the chapters of the loaded video, in any order (they are sorted
+  /// by start; of chapters sharing a start the first is kept). Pass an
+  /// empty list to clear them. Loading a different URL clears them too;
+  /// `load(chapters: ...)` sets them with the video.
+  ///
+  /// Parse them from a description with [NativeVideoPlayerChapters.parseText]
+  /// or from a WebVTT chapters track with [NativeVideoPlayerChapters.parseVtt].
+  void setChapters(List<NativeVideoPlayerChapter> chapters) {
+    final normalized = NativeVideoPlayerChapters.normalize(chapters);
+    if (listEquals(normalized, _chapters)) return;
+    _chapters = normalized;
+    if (_isDisposed) return;
+    if (!_chaptersController.isClosed) {
+      _chaptersController.add(this.chapters);
+    }
+    _updateCurrentChapter();
+  }
+
+  void _updateCurrentChapter() {
+    final chapter = NativeVideoPlayerChapters.chapterAt(
+      chapters,
+      _state.currentPosition,
+    );
+    if (chapter == _currentChapter) return;
+    _currentChapter = chapter;
+    if (!_isDisposed && !_currentChapterController.isClosed) {
+      _currentChapterController.add(chapter);
+    }
+  }
+
+  /// Seeks to the start of the next chapter. Does nothing in the last
+  /// chapter or without chapters.
+  Future<void> seekToNextChapter() async {
+    final chapters = this.chapters;
+    // A seek to a chapter start can report a position a hair before it;
+    // the tolerance keeps that from "skipping" to the same chapter again.
+    final index = NativeVideoPlayerChapters.indexAt(
+      chapters,
+      _state.currentPosition + const Duration(milliseconds: 250),
+    );
+    if (index + 1 >= chapters.length) return;
+    await seekTo(chapters[index + 1].start);
+  }
+
+  /// Seeks to the start of the current chapter, or to the previous chapter
+  /// when playback is within [restartThreshold] of the current one's start
+  /// (like a music player's back button). Does nothing without chapters.
+  Future<void> seekToPreviousChapter({
+    Duration restartThreshold = const Duration(seconds: 3),
+  }) async {
+    final chapters = this.chapters;
+    if (chapters.isEmpty) return;
+    final position = _state.currentPosition;
+    final index = NativeVideoPlayerChapters.indexAt(chapters, position);
+    if (index == -1) {
+      await seekTo(Duration.zero);
+    } else if (position - chapters[index].start > restartThreshold ||
+        index == 0) {
+      await seekTo(chapters[index].start);
+    } else {
+      await seekTo(chapters[index - 1].start);
+    }
   }
 
   /// The active A-B playback range, or null when playback is unrestricted.
@@ -3395,6 +3510,8 @@ class NativeVideoPlayerController {
     await _isLiveController.close();
     await _qualityChangedController.close();
     await _qualitiesController.close();
+    await _chaptersController.close();
+    await _currentChapterController.close();
     await _isOverlayLockedController.close();
     await _videoSizeController.close();
     await _surfaceSwapRequests.close();
