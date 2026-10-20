@@ -366,6 +366,9 @@ class SharedPlayerManager {
         // Clear media info cache
         mediaInfoCache.clear()
 
+        // Clear media info cache
+        mediaInfoCache.clear()
+
         // Drop controller-level event sinks (their channels are torn down by
         // the plugin on engine detach)
         controllerEventSinks.clear()
