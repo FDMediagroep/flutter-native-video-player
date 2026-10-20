@@ -17,20 +17,23 @@ You get everything the platform players are good at (HLS, DRM, Picture-in-Pictur
     <td align="center" width="50%"><img src="https://raw.githubusercontent.com/plug-and-pay/flutter-native-video-player/master/doc/media/scrub.webp" alt="Scrubbing with thumbnail previews"><br><sub><b>Scrub previews</b><br>storyboard thumbnails while you drag</sub></td>
   </tr>
   <tr>
+    <td align="center"><img src="https://raw.githubusercontent.com/plug-and-pay/flutter-native-video-player/master/doc/media/chapters.webp" alt="Scrubbing a seek bar split into chapters, snapping to a chapter start"><br><sub><b>Seek bar &amp; chapters</b><br>YouTube-style chapters that snap while you drag</sub></td>
     <td align="center"><img src="https://raw.githubusercontent.com/plug-and-pay/flutter-native-video-player/master/doc/media/live.webp" alt="Scrubbing back in a live stream and jumping to live"><br><sub><b>Live with DVR</b><br>scrub back, tap LIVE to catch up</sub></td>
+  </tr>
+  <tr>
     <td align="center"><img src="https://raw.githubusercontent.com/plug-and-pay/flutter-native-video-player/master/doc/media/fullscreen.webp" width="300" alt="Fullscreen flies out of the page, swipe down to close"><br><sub><b>Fullscreen that flies</b><br>out of the page, swipe down to close</sub></td>
-  </tr>
-  <tr>
     <td align="center"><img src="https://raw.githubusercontent.com/plug-and-pay/flutter-native-video-player/master/doc/media/pip.webp" width="300" alt="Picture-in-Picture over the home screen"><br><sub><b>Picture-in-Picture</b><br>keeps playing over other apps</sub></td>
+  </tr>
+  <tr>
     <td align="center"><img src="https://raw.githubusercontent.com/plug-and-pay/flutter-native-video-player/master/doc/media/cast.webp" width="300" alt="Finding and casting to a Chromecast"><br><sub><b>Chromecast</b><br>no Cast SDK, pure Dart</sub></td>
-  </tr>
-  <tr>
     <td align="center"><img src="https://raw.githubusercontent.com/plug-and-pay/flutter-native-video-player/master/doc/media/airplay.webp" width="300" alt="Sending the video to an Apple TV with AirPlay"><br><sub><b>AirPlay</b><br>to Apple TV and AirPlay speakers</sub></td>
-    <td align="center"><img src="https://raw.githubusercontent.com/plug-and-pay/flutter-native-video-player/master/doc/screenshots/captions.webp" width="300" alt="Styled sidecar captions over the video"><br><sub><b>Captions</b><br>embedded tracks and styleable VTT/SRT</sub></td>
   </tr>
   <tr>
+    <td align="center"><img src="https://raw.githubusercontent.com/plug-and-pay/flutter-native-video-player/master/doc/screenshots/captions.webp" width="300" alt="Styled sidecar captions over the video"><br><sub><b>Captions</b><br>embedded tracks and styleable VTT/SRT</sub></td>
     <td align="center"><img src="https://raw.githubusercontent.com/plug-and-pay/flutter-native-video-player/master/doc/screenshots/lock_screen.webp" width="300" alt="Now Playing on the iOS lock screen with artwork and controls"><br><sub><b>Lock screen & background</b><br>artwork, title and controls, keeps playing</sub></td>
-    <td align="center"><img src="https://raw.githubusercontent.com/plug-and-pay/flutter-native-video-player/master/doc/screenshots/feed.webp" width="300" alt="A feed of videos with posters and duration badges"><br><sub><b>Built for feeds</b><br>posters, badges, offline downloads</sub></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="https://raw.githubusercontent.com/plug-and-pay/flutter-native-video-player/master/doc/screenshots/feed.webp" width="300" alt="A feed of videos with posters and duration badges"><br><sub><b>Built for feeds</b><br>posters, badges, offline downloads</sub></td>
   </tr>
 </table>
 
