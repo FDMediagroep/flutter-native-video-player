@@ -52,6 +52,9 @@ import QuartzCore
     // gates inline PiP controller creation in light mode).
     var allowsInlinePictureInPicture: Bool = true
 
+    // When false, PiP hides its skip back/forward buttons (requiresLinearPlayback).
+    var showsPipSkipButtons: Bool = true
+
     var player: AVPlayer?
     private var methodChannel: FlutterMethodChannel
     private var channelName: String
@@ -422,6 +425,7 @@ import QuartzCore
             // PiP configuration from args
             let argsAllowsPiP = args["allowsPictureInPicture"] as? Bool ?? true
             let argsCanStartAutomatically = args["canStartPictureInPictureAutomatically"] as? Bool ?? true
+            let argsShowsPipSkipButtons = args["showPictureInPictureSkipButtons"] as? Bool ?? true
 
             // HDR configuration from args
             enableHDR = args["enableHDR"] as? Bool ?? false
@@ -450,23 +454,27 @@ import QuartzCore
                 if let sharedSettings = SharedPlayerManager.shared.getPipSettings(for: controllerIdValue) {
                     // Use existing shared settings
                     self.canStartPictureInPictureAutomatically = sharedSettings.canStartPictureInPictureAutomatically
+                    self.showsPipSkipButtons = sharedSettings.showsSkipButtons
                     applyAllowsPictureInPicture(sharedSettings.allowsPictureInPicture)
                     npLog("✅ Using shared PiP settings for controller \(controllerIdValue) - allows: \(sharedSettings.allowsPictureInPicture), autoStart: \(sharedSettings.canStartPictureInPictureAutomatically)")
                 } else {
                     // First view for this controller - store the settings
                     self.canStartPictureInPictureAutomatically = argsCanStartAutomatically
+                    self.showsPipSkipButtons = argsShowsPipSkipButtons
                     applyAllowsPictureInPicture(argsAllowsPiP)
                     SharedPlayerManager.shared.setPipSettings(
                         for: controllerIdValue,
                         allowsPictureInPicture: argsAllowsPiP,
                         canStartPictureInPictureAutomatically: argsCanStartAutomatically,
-                        showNativeControls: argsShowNativeControls
+                        showNativeControls: argsShowNativeControls,
+                        showsSkipButtons: argsShowsPipSkipButtons
                     )
                     npLog("✅ Stored new PiP settings for controller \(controllerIdValue) - allows: \(argsAllowsPiP), autoStart: \(argsCanStartAutomatically)")
                 }
             } else {
                 // Non-shared player - use settings from args
                 self.canStartPictureInPictureAutomatically = argsCanStartAutomatically
+                self.showsPipSkipButtons = argsShowsPipSkipButtons
                 applyAllowsPictureInPicture(argsAllowsPiP)
                 npLog("✅ PiP settings for non-shared player - allows: \(argsAllowsPiP), autoStart: \(argsCanStartAutomatically)")
             }
@@ -784,6 +792,7 @@ import QuartzCore
         let created: AVPictureInPictureController? = AVPictureInPictureController(playerLayer: playerLayer)
         guard let controller = created else { return nil }
         controller.delegate = self
+        controller.requiresLinearPlayback = !showsPipSkipButtons
         pipController = controller
         npLog("✅ Created inline PiP controller for view \(viewId) (light: \(usesLightView))")
         return controller

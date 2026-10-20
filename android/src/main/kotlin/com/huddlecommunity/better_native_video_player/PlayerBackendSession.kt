@@ -142,15 +142,17 @@ class PlayerBackendSession(
         eventHandler = VideoPlayerEventHandler(isSharedPlayer = isSharedPlayer)
 
         // Setup notification handler (shared for shared players)
+        val showPipSkipButtons =
+            args?.get("showPictureInPictureSkipButtons") as? Boolean ?: true
         notificationHandler = if (controllerId != null) {
             val handler = sharedPlayerManager.getOrCreateNotificationHandler(
-                context, controllerId, player, eventHandler
+                context, controllerId, player, eventHandler, showPipSkipButtons
             )
             // Update event handler for shared notification handler (in case it's being reused)
             handler.updateEventHandler(eventHandler)
             handler
         } else {
-            VideoPlayerNotificationHandler(context, player, eventHandler)
+            VideoPlayerNotificationHandler(context, player, eventHandler, showPipSkipButtons)
         }
 
         // Setup method handler with callback to update media info

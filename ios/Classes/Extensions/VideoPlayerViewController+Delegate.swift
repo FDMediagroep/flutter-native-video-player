@@ -17,6 +17,11 @@ extension VideoPlayerView: AVPlayerViewControllerDelegate {
         // Mark PiP as active
         isPipCurrentlyActive = true
 
+        // Only while in PiP: requiresLinearPlayback also disables inline scrubbing.
+        if !showsPipSkipButtons {
+            playerViewController.requiresLinearPlayback = true
+        }
+
         // Disable automatic inline PiP while PiP is active
         // This prevents the system from trying to trigger automatic PiP again
         if #available(iOS 14.2, *) {
@@ -118,6 +123,9 @@ extension VideoPlayerView: AVPlayerViewControllerDelegate {
         // Mark PiP as inactive
         isPipCurrentlyActive = false
         pipStopRequestedByCode = false
+        if !showsPipSkipButtons {
+            playerViewController.requiresLinearPlayback = false
+        }
 
         // The restore delegate set this (see the custom controller's didStop)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
@@ -208,6 +216,9 @@ extension VideoPlayerView: AVPlayerViewControllerDelegate {
 
     public func playerViewController(_ playerViewController: AVPlayerViewController, failedToStartPictureInPictureWithError error: Error) {
         npLog("❌ PiP failed to start (AVPlayerViewController): \(error.localizedDescription)")
+        if !showsPipSkipButtons {
+            playerViewController.requiresLinearPlayback = false
+        }
     }
     
     // This delegate method is called when automatic PiP is about to start (iOS 14.2+)

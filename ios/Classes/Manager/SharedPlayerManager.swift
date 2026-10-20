@@ -122,6 +122,7 @@ class SharedPlayerManager: NSObject {
         let allowsPictureInPicture: Bool
         let canStartPictureInPictureAutomatically: Bool
         let showNativeControls: Bool
+        let showsSkipButtons: Bool
     }
 
     private override init() {
@@ -350,11 +351,12 @@ class SharedPlayerManager: NSObject {
 
     /// Sets PiP settings for a controller
     /// This ensures the settings persist across all views using the same controller
-    func setPipSettings(for controllerId: Int, allowsPictureInPicture: Bool, canStartPictureInPictureAutomatically: Bool, showNativeControls: Bool) {
+    func setPipSettings(for controllerId: Int, allowsPictureInPicture: Bool, canStartPictureInPictureAutomatically: Bool, showNativeControls: Bool, showsSkipButtons: Bool) {
         pipSettings[controllerId] = PipSettings(
             allowsPictureInPicture: allowsPictureInPicture,
             canStartPictureInPictureAutomatically: canStartPictureInPictureAutomatically,
-            showNativeControls: showNativeControls
+            showNativeControls: showNativeControls,
+            showsSkipButtons: showsSkipButtons
         )
         npLog("   ✅ Stored PiP settings for controller \(controllerId) - allows: \(allowsPictureInPicture), autoStart: \(canStartPictureInPictureAutomatically)")
     }
