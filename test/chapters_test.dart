@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:better_native_video_player/better_native_video_player.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -337,6 +338,41 @@ Outro
       expect(snaps, ['Part two']);
     });
 
+    testWidgets('the default height fits the bar, an explicit one wins', (
+      tester,
+    ) async {
+      Future<double> heightWith(NativeVideoPlayerProgressBarStyle style) async {
+        await tester.pumpWidget(
+          host(
+            NativeVideoPlayerProgressBar(
+              duration: const Duration(seconds: 60),
+              onSeek: _ignoreSeek,
+              style: style,
+            ),
+          ),
+        );
+        return tester.getSize(find.byType(NativeVideoPlayerProgressBar)).height;
+      }
+
+      // The grown thumb (2 x 8) plus 4 px above and below.
+      expect(await heightWith(const NativeVideoPlayerProgressBarStyle()), 24);
+      expect(
+        await heightWith(
+          const NativeVideoPlayerProgressBarStyle(
+            barHeight: 2,
+            expandedBarHeight: 7,
+            thumbRadius: 0,
+            expandedThumbRadius: 10,
+          ),
+        ),
+        28,
+      );
+      expect(
+        await heightWith(const NativeVideoPlayerProgressBarStyle(height: 20)),
+        20,
+      );
+    });
+
     testWidgets('showPreview: false shows no bubble', (tester) async {
       await tester.pumpWidget(
         host(
@@ -438,6 +474,48 @@ Outro
       expect(find.text('0:30'), findsOneWidget);
       await gesture.up();
       await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a storyboard image that failed is fetched again later', (
+      tester,
+    ) async {
+      _FailingImage.loads = 0;
+      final storyboard = StoryboardThumbnails.fromUniformGrid(
+        spriteUrls: const ['https://cdn.example.com/seek/_0.jpg'],
+        frameInterval: const Duration(seconds: 10),
+        columns: 10,
+        frameWidth: 160,
+        frameHeight: 90,
+        framesPerSprite: 60,
+      );
+      await tester.pumpWidget(
+        host(
+          NativeVideoPlayerProgressBar(
+            duration: const Duration(seconds: 60),
+            storyboard: storyboard,
+            storyboardPrecacheLimit: 0,
+            storyboardImageProvider: (url, headers) => _FailingImage(url),
+            onSeek: _ignoreSeek,
+          ),
+        ),
+      );
+      Future<void> scrub() async {
+        final gesture = await tester.startGesture(at(tester, 100));
+        await gesture.moveTo(at(tester, 150));
+        await gesture.moveTo(at(tester, 180));
+        await tester.pumpAndSettle();
+        await gesture.up();
+        await tester.pumpAndSettle();
+      }
+
+      await scrub();
+      expect(_FailingImage.loads, 1);
+      expect(tester.takeException(), isNull);
+      // A 403 or a dropped connection must not lose the previews for the
+      // rest of the video: the next scrub asks again.
+      await scrub();
+      expect(_FailingImage.loads, 2);
       expect(tester.takeException(), isNull);
     });
 
@@ -859,3 +937,32 @@ Outro
 }
 
 void _ignoreSeek(Duration _) {}
+
+/// An image that always fails to load, counting the attempts.
+class _FailingImage extends ImageProvider<_FailingImage> {
+  const _FailingImage(this.url);
+
+  final String url;
+  static int loads = 0;
+
+  @override
+  Future<_FailingImage> obtainKey(ImageConfiguration configuration) =>
+      SynchronousFuture(this);
+
+  @override
+  ImageStreamCompleter loadImage(
+    _FailingImage key,
+    ImageDecoderCallback decode,
+  ) {
+    loads++;
+    return OneFrameImageStreamCompleter(
+      Future<ImageInfo>.error(StateError('403 for $url')),
+    );
+  }
+
+  @override
+  bool operator ==(Object other) => other is _FailingImage && other.url == url;
+
+  @override
+  int get hashCode => url.hashCode;
+}

@@ -434,6 +434,7 @@ NativeVideoPlayerProgressBar(
   showPreview: controller.isFullScreen, // no bubble on the small inline player
   snapDistance: 8,                      // px; snapToChapters: false turns it off
   style: const NativeVideoPlayerProgressBarStyle(
+    height: 20,   // the bar's box and touch area; by default it fits the bar
     barHeight: 2,
     expandedBarHeight: 7, // the whole bar thickens while touched
     thumbRadius: 0,       // no thumb at rest...

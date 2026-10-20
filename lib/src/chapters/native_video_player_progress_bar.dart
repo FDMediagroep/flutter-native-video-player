@@ -21,7 +21,7 @@ import 'native_video_player_scrub_preview.dart';
 @immutable
 class NativeVideoPlayerProgressBarStyle {
   const NativeVideoPlayerProgressBarStyle({
-    this.height = 32,
+    this.height,
     this.barHeight = 3,
     this.expandedBarHeight,
     this.activeSegmentHeight = 6,
@@ -38,8 +38,22 @@ class NativeVideoPlayerProgressBarStyle {
     this.snapPulse = true,
   });
 
-  /// Height of the touch area; the bar is centered in it.
-  final double height;
+  /// Height of the bar's box, which is also its touch area; the bar is
+  /// centered in it. Null fits the bar: the thickest it gets (the touched
+  /// segment, the expanded bar or the grown thumb) plus 4 px above and
+  /// below, 24 px with the defaults. Make sure it fits your overlay.
+  final double? height;
+
+  /// [height], or the fitted height when it is null.
+  double get effectiveHeight =>
+      height ??
+      [
+            barHeight,
+            expandedBarHeight ?? 0,
+            activeSegmentHeight,
+            expandedThumbRadius * 2,
+          ].reduce(math.max) +
+          8;
 
   /// Thickness of the bar at rest.
   final double barHeight;
@@ -338,6 +352,11 @@ class _NativeVideoPlayerProgressBarState
   final List<String> _precached = [];
   String? _precacheCenter;
 
+  /// When a storyboard URL last failed to precache; retried after
+  /// [_precacheRetryAfter].
+  final Map<String, DateTime> _precacheFailedAt = {};
+  static const _precacheRetryAfter = Duration(seconds: 10);
+
   NativeVideoPlayerController? get _c => widget.controller;
 
   Duration get _duration => widget.duration ?? _c?.duration ?? Duration.zero;
@@ -374,12 +393,21 @@ class _NativeVideoPlayerProgressBarState
       _releaseOverlayHold();
       _unlisten();
       _listen();
+    } else if ((oldWidget.position == null) != (widget.position == null) ||
+        (oldWidget.duration == null) != (widget.duration == null) ||
+        (oldWidget.bufferedPosition == null) !=
+            (widget.bufferedPosition == null) ||
+        (oldWidget.chapters == null) != (widget.chapters == null) ||
+        (oldWidget.isLive == null) != (widget.isLive == null)) {
+      _unlisten();
+      _listen();
     }
     _grow.duration = widget.style.expandDuration;
     _segmentSwitch.duration = widget.style.expandDuration;
     _preview.duration = widget.previewStyle.animationDuration;
     if (oldWidget.storyboard != widget.storyboard) {
       _precached.clear();
+      _precacheFailedAt.clear();
       _precacheCenter = null;
     }
   }
@@ -404,12 +432,15 @@ class _NativeVideoPlayerProgressBarState
       if (mounted) setState(() {});
     }
 
+    // Values passed in come with the parent's rebuilds; listening to
+    // their streams too would rebuild twice per tick.
     _subscriptions.addAll([
-      c.positionStream.listen(refresh),
-      c.durationStream.listen(refresh),
-      c.bufferedPositionStream.listen(refresh),
-      c.chaptersStream.listen(refresh),
-      c.isLiveStream.listen(refresh),
+      if (widget.position == null) c.positionStream.listen(refresh),
+      if (widget.duration == null) c.durationStream.listen(refresh),
+      if (widget.bufferedPosition == null)
+        c.bufferedPositionStream.listen(refresh),
+      if (widget.chapters == null) c.chaptersStream.listen(refresh),
+      if (widget.isLive == null) c.isLiveStream.listen(refresh),
     ]);
   }
 
@@ -549,14 +580,27 @@ class _NativeVideoPlayerProgressBarState
       final build =
           widget.storyboardImageProvider ??
           NativeVideoPlayerScrubPreview.defaultImageProvider;
+      final now = DateTime.now();
       for (final url in urls) {
         if (_precached.contains(url)) continue;
+        final failedAt = _precacheFailedAt[url];
+        if (failedAt != null &&
+            now.difference(failedAt) < _precacheRetryAfter) {
+          continue;
+        }
         _precached.add(url);
+        final provider = build(url, widget.storyboardHeaders);
         unawaited(
           precacheImage(
-            build(url, widget.storyboardHeaders),
+            provider,
             context,
-            onError: (error, stackTrace) => _precached.remove(url),
+            onError: (error, stackTrace) {
+              // Not cached: try again on a later scrub, after a pause.
+              _precached.remove(url);
+              _precacheFailedAt[url] = DateTime.now();
+              PaintingBinding.instance.imageCache.evict(provider);
+              _precacheCenter = null;
+            },
           ),
         );
       }
@@ -691,7 +735,7 @@ class _NativeVideoPlayerProgressBarState
             final grow = Curves.easeOut.transform(_grow.value);
             final pulse = math.sin(_pulse.value * math.pi) * 0.3;
             return CustomPaint(
-              size: Size(width, style.height),
+              size: Size(width, style.effectiveHeight),
               painter: _ChapterBarPainter(
                 segments: segments,
                 playedFraction: fractionOf(position),
@@ -760,7 +804,11 @@ class _NativeVideoPlayerProgressBarState
               child: Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  SizedBox(width: width, height: style.height, child: bar),
+                  SizedBox(
+                    width: width,
+                    height: style.effectiveHeight,
+                    child: bar,
+                  ),
                   ..._previewLayer(context, width, fractionOf),
                 ],
               ),
@@ -791,7 +839,7 @@ class _NativeVideoPlayerProgressBarState
       style.expandedBarHeight ?? 0,
       style.expandedThumbRadius * 2,
     ].reduce(math.max);
-    final barTop = style.height / 2 + tallest / 2;
+    final barTop = style.effectiveHeight / 2 + tallest / 2;
     final arrow = previewStyle.backgroundColor == null
         ? null
         : previewStyle.arrowSize;

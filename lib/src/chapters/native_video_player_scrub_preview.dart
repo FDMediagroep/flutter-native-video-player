@@ -379,7 +379,15 @@ class _PreviewFrame extends StatelessWidget {
       gaplessPlayback: true,
       filterQuality: FilterQuality.medium,
       fit: region == null ? BoxFit.cover : null,
-      errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+      errorBuilder: (context, error, stackTrace) {
+        // Forget the failure, so the next scrub asks again: a 403 or a
+        // dropped connection must not lose the previews for the whole
+        // video. This one leaves the frame out.
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => PaintingBinding.instance.imageCache.evict(image),
+        );
+        return const SizedBox.shrink();
+      },
       frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
         if (frame == null) {
           return box(child: null, color: style.thumbnailPlaceholderColor);
