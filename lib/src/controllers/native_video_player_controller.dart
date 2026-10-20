@@ -64,6 +64,7 @@ class NativeVideoPlayerController {
     this.mediaInfo,
     this.allowsPictureInPicture = true,
     this.canStartPictureInPictureAutomatically = true,
+    this.showPictureInPictureSkipButtons = true,
     this.lockToLandscape = true,
     this.enableHDR = true,
     this.enableLooping = false,
@@ -150,6 +151,13 @@ class NativeVideoPlayerController {
 
   /// Whether PiP can start automatically when app goes to background (iOS 14.2+)
   final bool canStartPictureInPictureAutomatically;
+
+  /// Whether the PiP window shows skip back/forward buttons (default: true)
+  ///
+  /// On Android these buttons come from the media session, so disabling them
+  /// also removes skip/previous/next from the media notification and lock
+  /// screen. On iOS this also disables scrubbing in the PiP window.
+  final bool showPictureInPictureSkipButtons;
 
   /// Whether to enable HDR playback (default: false)
   /// When set to false, HDR is disabled to prevent washed-out/too-white video appearance
@@ -1375,6 +1383,7 @@ class NativeVideoPlayerController {
     'allowsPictureInPicture': allowsPictureInPicture,
     'canStartPictureInPictureAutomatically':
         canStartPictureInPictureAutomatically,
+    'showPictureInPictureSkipButtons': showPictureInPictureSkipButtons,
     'showNativeControls': _hasCustomOverlay
         ? false
         : showNativeControls, // Hide native controls if we have custom overlay, otherwise use parameter

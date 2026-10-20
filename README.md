@@ -986,6 +986,7 @@ Remove listeners with `removeActivityListener` / `removeControlListener` before 
 | `showNativeControls` | `true` | platform controls when there's no overlay (`setShowNativeControls` changes it) |
 | `allowsPictureInPicture` | `true` | |
 | `canStartPictureInPictureAutomatically` | `true` | PiP when the app goes to the background |
+| `showPictureInPictureSkipButtons` | `true` | skip back/forward in the PiP window; on Android also removes them from the media notification |
 | `lockToLandscape` | `true` | fullscreen forces landscape |
 | `preferredOrientations` | — | orientations restored after fullscreen |
 | `preventFullscreenSwipeDismiss` | `true` | iOS native fullscreen closes with Done only |

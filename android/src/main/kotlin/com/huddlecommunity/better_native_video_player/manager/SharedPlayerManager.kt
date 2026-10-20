@@ -179,10 +179,11 @@ class SharedPlayerManager {
         context: Context,
         controllerId: Int,
         player: ExoPlayer,
-        eventHandler: VideoPlayerEventHandler
+        eventHandler: VideoPlayerEventHandler,
+        showSkipButtons: Boolean
     ): VideoPlayerNotificationHandler {
         return notificationHandlers.getOrPut(controllerId) {
-            VideoPlayerNotificationHandler(context, player, eventHandler)
+            VideoPlayerNotificationHandler(context, player, eventHandler, showSkipButtons)
         }
     }
 
