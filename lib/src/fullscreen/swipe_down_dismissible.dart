@@ -94,13 +94,20 @@ class _SwipeDownDismissibleState extends State<SwipeDownDismissible>
   Offset? _origin;
   bool _dragging = false;
 
-  late final AnimationController _settle = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 260),
-  )..addListener(_handleSettleTick);
   Offset _settleFrom = Offset.zero;
 
   final GlobalKey _contentKey = GlobalKey();
+
+  late final AnimationController _settle;
+
+  @override
+  void initState() {
+    super.initState();
+    _settle = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 260),
+    )..addListener(_handleSettleTick);
+  }
 
   @override
   void dispose() {
