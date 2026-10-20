@@ -61,13 +61,13 @@ class PlayerBackendSession(
      * otherwise a sibling would push its stale copy back on the next state change.
      */
     var currentMediaInfo: Map<String, Any>?
-        get() = controllerId?.let { SharedPlayerManager.getMediaInfo(it) } ?: localMediaInfo
+        get() = controllerId?.let { sharedPlayerManager.getMediaInfo(it) } ?: localMediaInfo
         private set(value) {
             localMediaInfo = value
             // Disposal clears the local copy but must not wipe the shared one
             // while sibling backends are still alive.
             if (controllerId != null && value != null) {
-                SharedPlayerManager.setMediaInfo(controllerId, value)
+                sharedPlayerManager.setMediaInfo(controllerId, value)
             }
         }
 
