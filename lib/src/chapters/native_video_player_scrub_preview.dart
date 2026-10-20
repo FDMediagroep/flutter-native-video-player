@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 
 import '../models/native_video_player_chapter.dart';
@@ -52,6 +54,7 @@ class NativeVideoPlayerScrubPreviewStyle {
     this.showChapterTitle = true,
     this.showTime = true,
     this.thumbnailWidth = 160,
+    this.thumbnailMaxHeight,
     this.thumbnailAspectRatio = 16 / 9,
     this.thumbnailBorder = const Border.fromBorderSide(
       BorderSide(color: Colors.white, width: 2),
@@ -78,11 +81,16 @@ class NativeVideoPlayerScrubPreviewStyle {
   final bool showChapterTitle;
   final bool showTime;
 
-  /// Width of the frame; the title wraps within it.
+  /// Width of the frame (and of the title, which wraps within it). The
+  /// frame keeps its own aspect ratio: landscape frames are this wide,
+  /// portrait ones are [thumbnailMaxHeight] tall instead.
   final double thumbnailWidth;
 
-  /// Aspect ratio of frames that are whole images (no sprite region) and
-  /// of chapter thumbnails.
+  /// The tallest the frame gets; null is [thumbnailWidth], so the long side
+  /// never exceeds it (a 9:16 frame shows at 90 × 160 with the defaults).
+  final double? thumbnailMaxHeight;
+
+  /// Aspect ratio of the placeholder while a frame of unknown shape loads.
   final double thumbnailAspectRatio;
 
   final BoxBorder? thumbnailBorder;
@@ -126,6 +134,7 @@ class NativeVideoPlayerScrubPreviewStyle {
     bool? showChapterTitle,
     bool? showTime,
     double? thumbnailWidth,
+    double? thumbnailMaxHeight,
     double? thumbnailAspectRatio,
     BoxBorder? thumbnailBorder,
     BorderRadius? thumbnailBorderRadius,
@@ -148,6 +157,7 @@ class NativeVideoPlayerScrubPreviewStyle {
     showChapterTitle: showChapterTitle ?? this.showChapterTitle,
     showTime: showTime ?? this.showTime,
     thumbnailWidth: thumbnailWidth ?? this.thumbnailWidth,
+    thumbnailMaxHeight: thumbnailMaxHeight ?? this.thumbnailMaxHeight,
     thumbnailAspectRatio: thumbnailAspectRatio ?? this.thumbnailAspectRatio,
     thumbnailBorder: thumbnailBorder ?? this.thumbnailBorder,
     thumbnailBorderRadius: thumbnailBorderRadius ?? this.thumbnailBorderRadius,
@@ -322,7 +332,7 @@ class NativeVideoPlayerScrubPreview extends StatelessWidget {
       return _PreviewFrame(
         key: const ValueKey('storyboard'),
         image: provider,
-        region: thumbnail.region,
+        thumbnail: thumbnail,
         style: style,
       );
     }
@@ -338,79 +348,160 @@ class NativeVideoPlayerScrubPreview extends StatelessWidget {
   }
 }
 
-/// One frame: a whole image, or a [region] cut out of a sprite sheet.
-/// Shows a placeholder while loading and disappears when loading fails.
-class _PreviewFrame extends StatelessWidget {
+/// One frame: a whole image, or the [thumbnail]'s crop of a sprite sheet,
+/// drawn at the frame's own aspect ratio (bounded by the style). Shows a
+/// placeholder while loading, keeps the last frame while the next sheet
+/// loads, and disappears when loading fails.
+class _PreviewFrame extends StatefulWidget {
   const _PreviewFrame({
     super.key,
     required this.image,
     required this.style,
-    this.region,
+    this.thumbnail,
   });
 
   final ImageProvider image;
-  final Rect? region;
+  final StoryboardThumbnail? thumbnail;
   final NativeVideoPlayerScrubPreviewStyle style;
 
   @override
-  Widget build(BuildContext context) {
-    final width = style.thumbnailWidth;
-    final region = this.region;
-    final scale = region == null ? 1.0 : width / region.width;
-    final height = region == null
-        ? width / style.thumbnailAspectRatio
-        : region.height * scale;
+  State<_PreviewFrame> createState() => _PreviewFrameState();
+}
 
-    Widget box({required Widget? child, Color? color}) => Container(
+class _PreviewFrameState extends State<_PreviewFrame> {
+  ImageStream? _stream;
+  late final ImageStreamListener _listener = ImageStreamListener(
+    _onImage,
+    onError: _onError,
+  );
+
+  /// The last decoded sheet, which provider it came from, and the
+  /// thumbnail last shown from it (kept while the next sheet loads).
+  ImageInfo? _info;
+  ImageProvider? _infoImage;
+  StoryboardThumbnail? _infoThumbnail;
+  bool _failed = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _resolve();
+  }
+
+  @override
+  void didUpdateWidget(_PreviewFrame oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.image != widget.image) _resolve();
+  }
+
+  @override
+  void dispose() {
+    _stream?.removeListener(_listener);
+    _info?.dispose();
+    super.dispose();
+  }
+
+  void _resolve() {
+    final stream = widget.image.resolve(createLocalImageConfiguration(context));
+    if (stream.key == _stream?.key) return;
+    _stream?.removeListener(_listener);
+    _failed = false;
+    _stream = stream..addListener(_listener);
+  }
+
+  void _onImage(ImageInfo info, bool synchronousCall) {
+    if (!mounted) {
+      info.dispose();
+      return;
+    }
+    setState(() {
+      _info?.dispose();
+      _info = info;
+      _infoImage = widget.image;
+      _failed = false;
+    });
+  }
+
+  void _onError(Object error, StackTrace? stackTrace) {
+    // Forget the failure, so the next scrub asks again: a 403 or a dropped
+    // connection must not lose the previews for the whole video. This one
+    // leaves the frame out.
+    PaintingBinding.instance.imageCache.evict(widget.image);
+    if (!mounted) return;
+    setState(() => _failed = true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_failed) return const SizedBox.shrink();
+    final style = widget.style;
+    final info = _info;
+    final current =
+        identical(_infoImage, widget.image) || _infoImage == widget.image;
+    if (current) _infoThumbnail = widget.thumbnail;
+    final thumbnail = current ? widget.thumbnail : _infoThumbnail;
+
+    Rect? source;
+    if (info != null) {
+      final imageSize = Size(
+        info.image.width.toDouble(),
+        info.image.height.toDouble(),
+      );
+      source = thumbnail?.regionIn(imageSize) ?? Offset.zero & imageSize;
+    }
+    final estimate = thumbnail?.region;
+    final aspect = source != null && source.height > 0
+        ? source.width / source.height
+        : estimate != null && estimate.height > 0
+        ? estimate.width / estimate.height
+        : style.thumbnailAspectRatio;
+
+    // thumbnailWidth wide, unless that makes it taller than allowed
+    // (portrait): then thumbnailMaxHeight tall.
+    var width = style.thumbnailWidth;
+    var height = width / aspect;
+    final maxHeight = style.thumbnailMaxHeight ?? style.thumbnailWidth;
+    if (height > maxHeight) {
+      height = maxHeight;
+      width = height * aspect;
+    }
+
+    return Container(
       width: width,
       height: height,
       decoration: BoxDecoration(
-        color: color,
+        color: info == null ? style.thumbnailPlaceholderColor : null,
         border: style.thumbnailBorder,
         borderRadius: style.thumbnailBorderRadius,
       ),
       clipBehavior: Clip.antiAlias,
-      child: child,
-    );
-
-    return Image(
-      image: image,
-      // Keep the last frame while the next sprite sheet loads.
-      gaplessPlayback: true,
-      filterQuality: FilterQuality.medium,
-      fit: region == null ? BoxFit.cover : null,
-      errorBuilder: (context, error, stackTrace) {
-        // Forget the failure, so the next scrub asks again: a 403 or a
-        // dropped connection must not lose the previews for the whole
-        // video. This one leaves the frame out.
-        WidgetsBinding.instance.addPostFrameCallback(
-          (_) => PaintingBinding.instance.imageCache.evict(image),
-        );
-        return const SizedBox.shrink();
-      },
-      frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-        if (frame == null) {
-          return box(child: null, color: style.thumbnailPlaceholderColor);
-        }
-        if (region == null) {
-          return box(child: SizedBox.expand(child: child));
-        }
-        return box(
-          child: OverflowBox(
-            alignment: Alignment.topLeft,
-            maxWidth: double.infinity,
-            maxHeight: double.infinity,
-            child: Transform.translate(
-              offset: Offset(-region.left * scale, -region.top * scale),
-              child: Transform.scale(
-                scale: scale,
-                alignment: Alignment.topLeft,
-                child: child,
-              ),
+      child: info == null
+          ? null
+          : CustomPaint(
+              size: Size(width, height),
+              painter: _FramePainter(info.image, source!),
             ),
-          ),
-        );
-      },
     );
   }
+}
+
+class _FramePainter extends CustomPainter {
+  _FramePainter(this.image, this.source);
+
+  final ui.Image image;
+  final Rect source;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawImageRect(
+      image,
+      source,
+      Offset.zero & size,
+      Paint()..filterQuality = FilterQuality.medium,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_FramePainter old) =>
+      old.image != image || old.source != source;
 }

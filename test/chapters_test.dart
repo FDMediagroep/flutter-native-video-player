@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:better_native_video_player/better_native_video_player.dart';
 import 'package:flutter/foundation.dart';
@@ -244,6 +245,39 @@ Outro
       );
     });
 
+    test('without an aspect ratio, the frame height comes from the sheet', () {
+      // 90 s at a frame every 2 s: 45 frames, one full sheet + 9 frames.
+      final storyboard = StoryboardThumbnails.bunnyFromPlaylistUrl(
+        'https://vz-abc.b-cdn.net/guid/playlist.m3u8',
+        duration: const Duration(seconds: 90),
+      )!;
+      final first = storyboard.thumbnailAt(const Duration(seconds: 14))!;
+      // Frame 7: column 1, row 1. A portrait sheet: 6 rows of 300 x 533.
+      expect(
+        first.regionIn(const Size(1800, 3198)),
+        const Rect.fromLTWH(300, 533, 300, 533),
+      );
+      // The partly filled last sheet has 2 rows (9 frames, 6 per row);
+      // frame 44 is its 9th: column 2, row 1.
+      final last = storyboard.thumbnailAt(const Duration(seconds: 88))!;
+      expect(last.gridCell!.rows, 2);
+      expect(
+        last.regionIn(const Size(1800, 1066)),
+        const Rect.fromLTWH(600, 533, 300, 533),
+      );
+      // With a known aspect ratio nothing is measured.
+      final known = StoryboardThumbnails.bunny(
+        videoBaseUrl: 'https://vz-abc.b-cdn.net/guid',
+        duration: const Duration(seconds: 90),
+        aspectRatio: 9 / 16,
+      );
+      expect(known.entries.first.gridCell, isNull);
+      expect(
+        known.entries[7].regionIn(const Size(1800, 3198)),
+        const Rect.fromLTWH(300, 533, 300, 533),
+      );
+    });
+
     test('null without a path', () {
       expect(
         StoryboardThumbnails.bunnyFromPlaylistUrl(
@@ -468,13 +502,170 @@ Outro
       await gesture.moveTo(at(tester, 205));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      // The frame is gone; title and time still show.
-      expect(find.byType(Image), findsOneWidget);
+      // The frame is left out; title and time still show.
       expect(find.text('Part two'), findsOneWidget);
       expect(find.text('0:30'), findsOneWidget);
       await gesture.up();
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a portrait frame keeps its shape, bounded in the bubble', (
+      tester,
+    ) async {
+      // A full Bunny sheet of a 9:16 video (72 s = 36 frames): 6 x 6
+      // frames of 300 x 533.
+      final sheet = (await tester.runAsync(
+        () => createTestImage(width: 1800, height: 3198),
+      ))!;
+      addTearDown(sheet.dispose);
+      final storyboard = StoryboardThumbnails.bunnyFromPlaylistUrl(
+        'https://vz-abc.b-cdn.net/guid/playlist.m3u8',
+        duration: const Duration(seconds: 72),
+      )!;
+      await tester.pumpWidget(
+        host(
+          NativeVideoPlayerProgressBar(
+            duration: const Duration(seconds: 72),
+            storyboard: storyboard,
+            storyboardPrecacheLimit: 0,
+            storyboardImageProvider: (url, headers) => _ReadyImage(url, sheet),
+            onSeek: _ignoreSeek,
+          ),
+        ),
+      );
+      final gesture = await tester.startGesture(at(tester, 100));
+      await gesture.moveTo(at(tester, 150));
+      await gesture.moveTo(at(tester, 180));
+      await tester.pumpAndSettle();
+      final frame = find.descendant(
+        of: find.byType(NativeVideoPlayerScrubPreview),
+        matching: find.byType(CustomPaint),
+      );
+      // The frame's box, border included.
+      final size = tester.getSize(
+        find.ancestor(of: frame.first, matching: find.byType(Container)).first,
+      );
+      expect(size.height, 160, reason: 'long side = thumbnailWidth');
+      expect(size.width, closeTo(160 * 300 / 533, 0.01));
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+
+    group('the preview never sticks out', () {
+      Widget hostAt(Widget bar, {required double top, double width = 400}) =>
+          MaterialApp(
+            home: Align(
+              alignment: Alignment.topLeft,
+              child: Padding(
+                padding: EdgeInsets.only(top: top),
+                child: SizedBox(width: width, child: bar),
+              ),
+            ),
+          );
+
+      Future<ui.Image> sheet(WidgetTester tester) async {
+        final image = (await tester.runAsync(
+          () => createTestImage(width: 1600, height: 540),
+        ))!;
+        addTearDown(image.dispose);
+        return image;
+      }
+
+      StoryboardThumbnails board() => StoryboardThumbnails.fromUniformGrid(
+        spriteUrls: const ['https://cdn.example.com/s.jpg'],
+        frameInterval: const Duration(seconds: 10),
+        columns: 10,
+        frameWidth: 160,
+        frameHeight: 90,
+        framesPerSprite: 60,
+      );
+
+      Future<TestGesture> drag(WidgetTester tester, double x) async {
+        final gesture = await tester.startGesture(at(tester, x - 50));
+        await gesture.moveTo(at(tester, x - 20));
+        await gesture.moveTo(at(tester, x));
+        await tester.pumpAndSettle();
+        return gesture;
+      }
+
+      testWidgets('scaled down to the room above the bar', (tester) async {
+        final image = await sheet(tester);
+        await tester.pumpWidget(
+          hostAt(
+            NativeVideoPlayerProgressBar(
+              duration: const Duration(seconds: 60),
+              chapters: _chapters,
+              storyboard: board(),
+              storyboardPrecacheLimit: 0,
+              storyboardImageProvider: (url, _) => _ReadyImage(url, image),
+              onSeek: _ignoreSeek,
+            ),
+            top: 70, // a small inline player: 70 px above the bar
+          ),
+        );
+        final gesture = await drag(tester, 120);
+        final bar = tester.getRect(find.byType(NativeVideoPlayerProgressBar));
+        final bubble = tester.getRect(
+          find.byType(NativeVideoPlayerScrubPreview),
+        );
+        expect(bubble.top, greaterThanOrEqualTo(0), reason: 'stays on screen');
+        expect(bubble.bottom, lessThan(bar.top + 12));
+        expect(bubble.height, lessThan(90), reason: 'frame + text scaled');
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('left out when there is no room', (tester) async {
+        await tester.pumpWidget(
+          hostAt(
+            const NativeVideoPlayerProgressBar(
+              duration: Duration(seconds: 60),
+              chapters: _chapters,
+              onSeek: _ignoreSeek,
+            ),
+            top: 0,
+          ),
+        );
+        final gesture = await drag(tester, 205);
+        expect(find.byType(NativeVideoPlayerScrubPreview), findsNothing);
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      });
+
+      testWidgets('no wider than the bar, previewMaxHeight caps it', (
+        tester,
+      ) async {
+        final image = await sheet(tester);
+        await tester.pumpWidget(
+          hostAt(
+            NativeVideoPlayerProgressBar(
+              duration: const Duration(seconds: 60),
+              storyboard: board(),
+              storyboardPrecacheLimit: 0,
+              storyboardImageProvider: (url, _) => _ReadyImage(url, image),
+              previewMaxHeight: 60,
+              onSeek: _ignoreSeek,
+            ),
+            top: 300,
+            width: 100, // narrower than the 160 px frame
+          ),
+        );
+        final gesture = await drag(tester, 60);
+        final bar = tester.getRect(find.byType(NativeVideoPlayerProgressBar));
+        final bubble = tester.getRect(
+          find.byType(NativeVideoPlayerScrubPreview),
+        );
+        expect(bubble.left, greaterThanOrEqualTo(bar.left - 0.01));
+        expect(bubble.right, lessThanOrEqualTo(bar.right + 0.01));
+        expect(bubble.height, lessThanOrEqualTo(60.01));
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      });
     });
 
     testWidgets('a storyboard image that failed is fetched again later', (
@@ -962,6 +1153,32 @@ class _FailingImage extends ImageProvider<_FailingImage> {
 
   @override
   bool operator ==(Object other) => other is _FailingImage && other.url == url;
+
+  @override
+  int get hashCode => url.hashCode;
+}
+
+/// An image that is already decoded, for frame layout tests.
+class _ReadyImage extends ImageProvider<_ReadyImage> {
+  const _ReadyImage(this.url, this.image);
+
+  final String url;
+  final ui.Image image;
+
+  @override
+  Future<_ReadyImage> obtainKey(ImageConfiguration configuration) =>
+      SynchronousFuture(this);
+
+  @override
+  ImageStreamCompleter loadImage(
+    _ReadyImage key,
+    ImageDecoderCallback decode,
+  ) => OneFrameImageStreamCompleter(
+    SynchronousFuture(ImageInfo(image: image.clone())),
+  );
+
+  @override
+  bool operator ==(Object other) => other is _ReadyImage && other.url == url;
 
   @override
   int get hashCode => url.hashCode;

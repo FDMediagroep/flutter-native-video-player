@@ -1,4 +1,5 @@
-import 'dart:ui' show Rect;
+import 'dart:math' as math;
+import 'dart:ui' show Rect, Size;
 
 import 'package:flutter/foundation.dart';
 
@@ -14,6 +15,7 @@ class StoryboardThumbnail {
     required this.end,
     required this.url,
     this.region,
+    this.gridCell,
   });
 
   final Duration start;
@@ -23,7 +25,46 @@ class StoryboardThumbnail {
   final String url;
 
   /// Sprite-sheet crop from a `#xywh=x,y,w,h` fragment; null = whole image.
+  ///
+  /// With a [gridCell] this is only an estimate (the frame height is not
+  /// known before the sheet is loaded); use [regionIn] once it is.
   final Rect? region;
+
+  /// The frame's place in a sprite grid whose frame height is measured
+  /// from the loaded sheet (Bunny Stream without a known aspect ratio).
+  final StoryboardGridCell? gridCell;
+
+  /// The crop for a loaded sheet of [imageSize] (in image pixels): from the
+  /// [gridCell] when there is one, else [region].
+  Rect? regionIn(Size imageSize) {
+    final cell = gridCell;
+    if (cell == null) return region;
+    final height = imageSize.height / cell.rows;
+    return Rect.fromLTWH(
+      cell.column * cell.frameWidth,
+      cell.row * height,
+      cell.frameWidth,
+      height,
+    );
+  }
+}
+
+/// Where a frame sits in a sprite sheet: [column] and [row] of a grid of
+/// [frameWidth]-wide cells, [rows] high (fewer for a partly filled last
+/// sheet). The cell height is the sheet height divided by [rows].
+@immutable
+class StoryboardGridCell {
+  const StoryboardGridCell({
+    required this.column,
+    required this.row,
+    required this.rows,
+    required this.frameWidth,
+  });
+
+  final int column;
+  final int row;
+  final int rows;
+  final double frameWidth;
 }
 
 /// WebVTT storyboard parsing for scrub-bar thumbnail previews.
@@ -97,6 +138,11 @@ class StoryboardThumbnails {
   /// [framesPerSprite] tiles ([columns] per row), every tile covering
   /// [frameInterval] of playback. [totalFrames] caps the count when the
   /// last sheet is partial (e.g. Vimeo's `frames`).
+  ///
+  /// With [measureFrameHeight] the real tile height is taken from each
+  /// loaded sheet (its height divided by its rows), for sheets whose frames
+  /// keep the video's own aspect ratio when that is unknown; [frameHeight]
+  /// is then only the estimate in [StoryboardThumbnail.region].
   factory StoryboardThumbnails.fromUniformGrid({
     required List<String> spriteUrls,
     required Duration frameInterval,
@@ -105,6 +151,7 @@ class StoryboardThumbnails {
     required double frameHeight,
     required int framesPerSprite,
     int? totalFrames,
+    bool measureFrameHeight = false,
   }) {
     assert(columns > 0 && framesPerSprite > 0);
     assert(frameInterval > Duration.zero);
@@ -116,6 +163,10 @@ class StoryboardThumbnails {
         break;
       }
       final indexInSheet = frame % framesPerSprite;
+      final framesInSheet = math.min(
+        framesPerSprite,
+        frameCount - sheet * framesPerSprite,
+      );
       entries.add(
         StoryboardThumbnail(
           start: frameInterval * frame,
@@ -127,6 +178,14 @@ class StoryboardThumbnails {
             frameWidth,
             frameHeight,
           ),
+          gridCell: measureFrameHeight
+              ? StoryboardGridCell(
+                  column: indexInSheet % columns,
+                  row: indexInSheet ~/ columns,
+                  rows: (framesInSheet / columns).ceil(),
+                  frameWidth: frameWidth,
+                )
+              : null,
         ),
       );
     }
@@ -140,12 +199,17 @@ class StoryboardThumbnails {
   ///
   /// [videoBaseUrl] is the video's folder on the pull zone,
   /// `https://{pull_zone}.b-cdn.net/{video_id}`. [duration] is the video's
-  /// length (Bunny's API `length`, or the player's `duration`) and
-  /// [aspectRatio] its width / height, which sets the frame height.
+  /// length (Bunny's API `length`, or the player's `duration`).
+  ///
+  /// Bunny keeps frames 300 px wide in any orientation, so their height
+  /// follows the video: [aspectRatio] (width / height) sets it when you know
+  /// it. Leave it null and it is measured from each loaded sheet instead,
+  /// which also gets portrait videos right
+  /// ([StoryboardThumbnail.regionIn]; `region` then holds a 16:9 estimate).
   factory StoryboardThumbnails.bunny({
     required String videoBaseUrl,
     required Duration duration,
-    double aspectRatio = 16 / 9,
+    double? aspectRatio,
   }) => StoryboardThumbnails._bunny(
     videoBaseUrl: videoBaseUrl,
     query: '',
@@ -163,7 +227,7 @@ class StoryboardThumbnails {
   static StoryboardThumbnails? bunnyFromPlaylistUrl(
     String playlistUrl, {
     required Duration duration,
-    double aspectRatio = 16 / 9,
+    double? aspectRatio,
   }) {
     final queryStart = playlistUrl.indexOf('?');
     final path = queryStart == -1
@@ -185,9 +249,9 @@ class StoryboardThumbnails {
     required String videoBaseUrl,
     required String query,
     required Duration duration,
-    required double aspectRatio,
+    required double? aspectRatio,
   }) {
-    assert(aspectRatio > 0);
+    assert(aspectRatio == null || aspectRatio > 0);
     const framesPerSprite = 36;
     const frameWidth = 300.0;
     final interval = duration < const Duration(seconds: 10)
@@ -205,9 +269,10 @@ class StoryboardThumbnails {
       frameInterval: interval,
       columns: 6,
       frameWidth: frameWidth,
-      frameHeight: (frameWidth / aspectRatio).floorToDouble(),
+      frameHeight: (frameWidth / (aspectRatio ?? 16 / 9)).floorToDouble(),
       framesPerSprite: framesPerSprite,
       totalFrames: frames,
+      measureFrameHeight: aspectRatio == null,
     );
   }
 

@@ -383,6 +383,8 @@ final board = StoryboardThumbnails.bunny(
 );
 
 // …or straight from the HLS URL you play. A signed URL keeps its token.
+// Without aspectRatio the frame shape is measured from the sprite, so
+// portrait videos work too.
 final board = StoryboardThumbnails.bunnyFromPlaylistUrl(playlistUrl, duration: videoLength);
 
 final thumb = board.thumbnailAt(dragPosition);
@@ -471,6 +473,8 @@ Or replace the bubble entirely with `previewBuilder: (context, details) => ...` 
 `onPreviewChanged` also fires with `showPreview: false`, so you can hide the bubble and draw the frame and title wherever you like, such as large in the middle of the video.
 
 **Your own values and seeking.** Pass `position`, `duration`, `bufferedPosition` or `isLive` to override what the controller reports, and `onSeek` to seek another way (e.g. while casting). Pass all of them and you don't need a controller at all, so the same bar works for an audio player.
+
+**Small players.** The bubble never sticks out of the player: it is limited to the room between the bar and the top of the player, and to the bar's width, and scaled down when it doesn't fit (left out when there is hardly any room). `previewMaxHeight` caps it further. Frames keep their own shape, so a portrait video's frame shows tall, bounded by `thumbnailWidth` (and `thumbnailMaxHeight`).
 
 **Images.** Storyboard images load with `storyboardHeaders`, or through your own provider (`storyboardImageProvider: (url, headers) => CachedNetworkImageProvider(url, headers: headers)`). The sheets around the playing position are loaded ahead (`storyboardPrecacheLimit`, default 4), so the frame is usually there before your finger is. An image that fails to load is simply left out of the bubble.
 

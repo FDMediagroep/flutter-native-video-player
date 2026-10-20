@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 
 import '../controllers/native_video_player_controller.dart';
 import '../models/native_video_player_chapter.dart';
+import '../native_video_player_widget.dart';
 import '../subtitles/storyboard_thumbnails.dart';
 import 'native_video_player_chapters.dart';
 import 'native_video_player_scrub_preview.dart';
@@ -173,6 +174,7 @@ class NativeVideoPlayerProgressBar extends StatefulWidget {
     this.style = const NativeVideoPlayerProgressBarStyle(),
     this.previewStyle = const NativeVideoPlayerScrubPreviewStyle(),
     this.previewBuilder,
+    this.previewMaxHeight,
     this.onScrubStart,
     this.onScrubUpdate,
     this.onScrubEnd,
@@ -244,6 +246,12 @@ class NativeVideoPlayerProgressBar extends StatefulWidget {
 
   final NativeVideoPlayerProgressBarStyle style;
   final NativeVideoPlayerScrubPreviewStyle previewStyle;
+
+  /// The tallest the preview may get above the bar. Null measures the room
+  /// up to the top of the player (or the screen's safe area), so the bubble
+  /// never sticks out of a small inline player. A bubble that does not fit
+  /// is scaled down; with too little room it is left out.
+  final double? previewMaxHeight;
 
   /// Builds the bubble instead of [NativeVideoPlayerScrubPreview]. It is
   /// centered over the finger and kept inside the bar's ends; the bar
@@ -337,6 +345,32 @@ class _NativeVideoPlayerProgressBarState
 
   /// Mouse x while hovering (desktop/web).
   double? _hoverX;
+
+  /// Room above the bar for the preview, measured when scrubbing starts.
+  double _roomAbove = double.infinity;
+
+  /// The distance from this bar's top up to the top of the player it sits
+  /// in (or the safe area of the screen without one).
+  double _measureRoomAbove() {
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.hasSize || !box.attached) {
+      return double.infinity;
+    }
+    final top = box.localToGlobal(Offset.zero).dy;
+    RenderBox? player;
+    context.visitAncestorElements((element) {
+      if (element.widget is NativeVideoPlayer) {
+        final render = element.findRenderObject();
+        if (render is RenderBox && render.hasSize) player = render;
+        return false;
+      }
+      return true;
+    });
+    final limit = player != null
+        ? player!.localToGlobal(Offset.zero).dy
+        : MediaQuery.maybePaddingOf(context)?.top ?? 0;
+    return math.max(0, top - limit);
+  }
 
   int _activeSegment = -1;
   int _previousSegment = -1;
@@ -490,6 +524,7 @@ class _NativeVideoPlayerProgressBarState
 
   void _start(double x, double width) {
     if (_duration <= Duration.zero) return;
+    _roomAbove = _measureRoomAbove();
     final (position, snapped) = _positionAt(x, width);
     _settleTimer?.cancel();
     _snappedTo = snapped;
@@ -557,6 +592,7 @@ class _NativeVideoPlayerProgressBarState
   }
 
   void _hover(double? x) {
+    if (x != null && _hoverX == null) _roomAbove = _measureRoomAbove();
     setState(() => _hoverX = x);
     if (x != null) {
       _expand();
@@ -845,6 +881,16 @@ class _NativeVideoPlayerProgressBarState
         : previewStyle.arrowSize;
     final bubbleBottom = barTop + previewStyle.gapToBar + (arrow?.height ?? 0);
 
+    // The slot runs from above the arrow up to the top of the player (or
+    // previewMaxHeight): the bubble is scaled down to fit it, and left out
+    // when there is hardly any room.
+    final room = math.min(
+      widget.previewMaxHeight ?? double.infinity,
+      _roomAbove + style.effectiveHeight - bubbleBottom,
+    );
+    if (room < _minPreviewRoom) return const [];
+    final slotHeight = room.isFinite ? room : 600.0;
+
     final bubble =
         widget.previewBuilder?.call(context, details) ??
         NativeVideoPlayerScrubPreview(
@@ -870,10 +916,14 @@ class _NativeVideoPlayerProgressBarState
         left: 0,
         right: 0,
         bottom: bubbleBottom,
-        // Room for the tallest bubble; the bubble sits at its bottom.
-        height: 600,
+        // The bubble sits at the bottom of its slot, scaled down when it
+        // is wider than the bar or taller than the slot.
+        height: slotHeight,
         child: appear(
-          CustomSingleChildLayout(delegate: _BubbleLayout(x), child: bubble),
+          CustomSingleChildLayout(
+            delegate: _BubbleLayout(x),
+            child: FittedBox(fit: BoxFit.scaleDown, child: bubble),
+          ),
           Alignment((x / math.max(width, 1) * 2 - 1).clamp(-1.0, 1.0), 1),
         ),
       ),
@@ -898,8 +948,11 @@ class _NativeVideoPlayerProgressBarState
   }
 }
 
+/// Less room than this above the bar and the preview is left out.
+const double _minPreviewRoom = 28;
+
 /// Centers the bubble on the finger, kept inside the bar's ends, at the
-/// bottom of its (tall) slot.
+/// bottom of its slot.
 class _BubbleLayout extends SingleChildLayoutDelegate {
   _BubbleLayout(this.x);
 

@@ -39,6 +39,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returned callback runs, without touching `lockOverlay()`.
   `NativeVideoPlayerProgressBar` holds it while the viewer scrubs, so the
   controls never hide mid-drag.
+- Scrub previews fit the player: the bubble is bounded by the room above
+  the bar (up to the top of the `NativeVideoPlayer`) and the bar's width,
+  scaled down when it doesn't fit, and left out when there is no room;
+  `previewMaxHeight` caps it. Frames keep their real aspect ratio
+  (`thumbnailMaxHeight` bounds portrait ones), failed images are retried on
+  a later scrub, and the bar's default `height` fits the bar (24 px).
+- Bunny storyboards without an `aspectRatio` measure the frame height from
+  each loaded sheet (`StoryboardThumbnail.regionIn`, `gridCell`), so portrait
+  videos show the right frame.
 - `StoryboardThumbnails.bunnyFromPlaylistUrl(playlistUrl, duration:)`, which
   keeps a signed URL's token, and `headers:` on `StoryboardThumbnails.fromUrl`.
 
