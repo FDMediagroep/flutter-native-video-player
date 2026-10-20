@@ -63,11 +63,31 @@ class VideoPlayerNotificationHandler(
     private fun buildSessionPlayer(): Player {
         if (showSkipButtons) return player
         return object : ForwardingPlayer(player) {
+            private val listeners = mutableMapOf<Player.Listener, Player.Listener>()
+
             override fun getAvailableCommands(): Player.Commands =
                 super.getAvailableCommands().buildUpon().removeAll(*SKIP_COMMANDS).build()
 
             override fun isCommandAvailable(command: Int): Boolean =
                 command !in SKIP_COMMANDS && super.isCommandAvailable(command)
+
+            override fun addListener(listener: Player.Listener) {
+                val forwardingListener = listeners.getOrPut(listener) {
+                    object : Player.Listener by listener {
+                        override fun onAvailableCommandsChanged(availableCommands: Player.Commands) {
+                            listener.onAvailableCommandsChanged(
+                                availableCommands.buildUpon().removeAll(*SKIP_COMMANDS).build()
+                            )
+                        }
+                    }
+                }
+                super.addListener(forwardingListener)
+            }
+
+            override fun removeListener(listener: Player.Listener) {
+                val forwardingListener = listeners.remove(listener) ?: return
+                super.removeListener(forwardingListener)
+            }
         }
     }
 
