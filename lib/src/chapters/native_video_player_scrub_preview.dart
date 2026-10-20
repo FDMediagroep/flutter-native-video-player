@@ -60,7 +60,6 @@ class NativeVideoPlayerScrubPreviewStyle {
       BorderSide(color: Colors.white, width: 2),
     ),
     this.thumbnailBorderRadius = const BorderRadius.all(Radius.circular(10)),
-    this.thumbnailPlaceholderColor = const Color(0x66000000),
     this.titleStyle,
     this.timeStyle,
     this.maxTitleLines = 2,
@@ -90,14 +89,12 @@ class NativeVideoPlayerScrubPreviewStyle {
   /// never exceeds it (a 9:16 frame shows at 90 × 160 with the defaults).
   final double? thumbnailMaxHeight;
 
-  /// Aspect ratio of the placeholder while a frame of unknown shape loads.
+  /// Aspect ratio used for a frame before its sheet is loaded and measured
+  /// (only for sizing; nothing is drawn until the image is there).
   final double thumbnailAspectRatio;
 
   final BoxBorder? thumbnailBorder;
   final BorderRadius thumbnailBorderRadius;
-
-  /// Fill of the frame while its image is still loading.
-  final Color thumbnailPlaceholderColor;
 
   /// Text styles; null is white with a soft shadow (title semi-bold, time
   /// bold with tabular figures).
@@ -138,7 +135,6 @@ class NativeVideoPlayerScrubPreviewStyle {
     double? thumbnailAspectRatio,
     BoxBorder? thumbnailBorder,
     BorderRadius? thumbnailBorderRadius,
-    Color? thumbnailPlaceholderColor,
     TextStyle? titleStyle,
     TextStyle? timeStyle,
     int? maxTitleLines,
@@ -161,8 +157,6 @@ class NativeVideoPlayerScrubPreviewStyle {
     thumbnailAspectRatio: thumbnailAspectRatio ?? this.thumbnailAspectRatio,
     thumbnailBorder: thumbnailBorder ?? this.thumbnailBorder,
     thumbnailBorderRadius: thumbnailBorderRadius ?? this.thumbnailBorderRadius,
-    thumbnailPlaceholderColor:
-        thumbnailPlaceholderColor ?? this.thumbnailPlaceholderColor,
     titleStyle: titleStyle ?? this.titleStyle,
     timeStyle: timeStyle ?? this.timeStyle,
     maxTitleLines: maxTitleLines ?? this.maxTitleLines,
@@ -349,8 +343,9 @@ class NativeVideoPlayerScrubPreview extends StatelessWidget {
 }
 
 /// One frame: a whole image, or the [thumbnail]'s crop of a sprite sheet,
-/// drawn at the frame's own aspect ratio (bounded by the style). Shows a
-/// placeholder while loading, keeps the last frame while the next sheet
+/// drawn at the frame's own aspect ratio (bounded by the style). Takes no
+/// room until its first sheet is loaded (the bubble shows the time alone,
+/// then grows the frame in), keeps the last frame while the next sheet
 /// loads, and disappears when loading fails.
 class _PreviewFrame extends StatefulWidget {
   const _PreviewFrame({
@@ -433,27 +428,22 @@ class _PreviewFrameState extends State<_PreviewFrame> {
 
   @override
   Widget build(BuildContext context) {
-    if (_failed) return const SizedBox.shrink();
-    final style = widget.style;
     final info = _info;
+    // Nothing to show yet (or ever): no empty box, the time alone.
+    if (_failed || info == null) return const SizedBox.shrink();
+    final style = widget.style;
     final current =
         identical(_infoImage, widget.image) || _infoImage == widget.image;
     if (current) _infoThumbnail = widget.thumbnail;
     final thumbnail = current ? widget.thumbnail : _infoThumbnail;
 
-    Rect? source;
-    if (info != null) {
-      final imageSize = Size(
-        info.image.width.toDouble(),
-        info.image.height.toDouble(),
-      );
-      source = thumbnail?.regionIn(imageSize) ?? Offset.zero & imageSize;
-    }
-    final estimate = thumbnail?.region;
-    final aspect = source != null && source.height > 0
+    final imageSize = Size(
+      info.image.width.toDouble(),
+      info.image.height.toDouble(),
+    );
+    final source = thumbnail?.regionIn(imageSize) ?? Offset.zero & imageSize;
+    final aspect = source.height > 0
         ? source.width / source.height
-        : estimate != null && estimate.height > 0
-        ? estimate.width / estimate.height
         : style.thumbnailAspectRatio;
 
     // thumbnailWidth wide, unless that makes it taller than allowed
@@ -470,17 +460,14 @@ class _PreviewFrameState extends State<_PreviewFrame> {
       width: width,
       height: height,
       decoration: BoxDecoration(
-        color: info == null ? style.thumbnailPlaceholderColor : null,
         border: style.thumbnailBorder,
         borderRadius: style.thumbnailBorderRadius,
       ),
       clipBehavior: Clip.antiAlias,
-      child: info == null
-          ? null
-          : CustomPaint(
-              size: Size(width, height),
-              painter: _FramePainter(info.image, source!),
-            ),
+      child: CustomPaint(
+        size: Size(width, height),
+        painter: _FramePainter(info.image, source),
+      ),
     );
   }
 }

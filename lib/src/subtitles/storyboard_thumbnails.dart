@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'dart:ui' show Rect, Size;
 
 import 'package:flutter/foundation.dart';
@@ -50,8 +49,9 @@ class StoryboardThumbnail {
 }
 
 /// Where a frame sits in a sprite sheet: [column] and [row] of a grid of
-/// [frameWidth]-wide cells, [rows] high (fewer for a partly filled last
-/// sheet). The cell height is the sheet height divided by [rows].
+/// [frameWidth]-wide cells, [rows] high. The cell height is the sheet
+/// height divided by [rows]; sheets are padded to the full grid, so a
+/// partly filled last sheet has the same [rows].
 @immutable
 class StoryboardGridCell {
   const StoryboardGridCell({
@@ -140,7 +140,8 @@ class StoryboardThumbnails {
   /// last sheet is partial (e.g. Vimeo's `frames`).
   ///
   /// With [measureFrameHeight] the real tile height is taken from each
-  /// loaded sheet (its height divided by its rows), for sheets whose frames
+  /// loaded sheet (its height divided by the grid's rows, the last sheet
+  /// padded like the others, as Bunny Stream does), for sheets whose frames
   /// keep the video's own aspect ratio when that is unknown; [frameHeight]
   /// is then only the estimate in [StoryboardThumbnail.region].
   factory StoryboardThumbnails.fromUniformGrid({
@@ -163,10 +164,6 @@ class StoryboardThumbnails {
         break;
       }
       final indexInSheet = frame % framesPerSprite;
-      final framesInSheet = math.min(
-        framesPerSprite,
-        frameCount - sheet * framesPerSprite,
-      );
       entries.add(
         StoryboardThumbnail(
           start: frameInterval * frame,
@@ -182,7 +179,8 @@ class StoryboardThumbnails {
               ? StoryboardGridCell(
                   column: indexInSheet % columns,
                   row: indexInSheet ~/ columns,
-                  rows: (framesInSheet / columns).ceil(),
+                  // Sheets are padded to the full grid, the last one too.
+                  rows: (framesPerSprite / columns).ceil(),
                   frameWidth: frameWidth,
                 )
               : null,

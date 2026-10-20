@@ -476,7 +476,7 @@ Or replace the bubble entirely with `previewBuilder: (context, details) => ...` 
 
 **Small players.** The bubble never sticks out of the player: it is limited to the room between the bar and the top of the player, and to the bar's width, and scaled down when it doesn't fit (left out when there is hardly any room). `previewMaxHeight` caps it further. Frames keep their own shape, so a portrait video's frame shows tall, bounded by `thumbnailWidth` (and `thumbnailMaxHeight`).
 
-**Images.** Storyboard images load with `storyboardHeaders`, or through your own provider (`storyboardImageProvider: (url, headers) => CachedNetworkImageProvider(url, headers: headers)`). The sheets around the playing position are loaded ahead (`storyboardPrecacheLimit`, default 4), so the frame is usually there before your finger is. An image that fails to load is simply left out of the bubble.
+**Images.** Storyboard images load with `storyboardHeaders`, or through your own provider (`storyboardImageProvider: (url, headers) => CachedNetworkImageProvider(url, headers: headers)`). The bar keeps the sheets around the playing position (and around your finger while scrubbing) loaded, before the first play too, so the frame is there when you scrub. That's at most `storyboardPrecacheLimit` sheets (default 4), so memory stays bounded. While a sheet is still loading the bubble shows just the time; an image that fails to load is left out and tried again on a later scrub.
 
 **Your own bar.** The math is public too: `NativeVideoPlayerChapters.segments(chapters, duration)` gives each segment's start and end as fractions of the bar, and `snapTarget(chapters, position, threshold:)` the chapter start to snap to.
 

@@ -382,8 +382,11 @@ class _NativeVideoPlayerProgressBarState
   NativeVideoPlayerScrubDetails? _reportedDetails;
   int _reportedChapter = -1;
 
-  /// Storyboard URLs already handed to [precacheImage], newest last.
-  final List<String> _precached = [];
+  /// Storyboard sheets kept loaded around the position, by URL: listening
+  /// keeps each decoded and live in the image cache, so a busy app's other
+  /// images can't push it out before the viewer scrubs. At most
+  /// [NativeVideoPlayerProgressBar.storyboardPrecacheLimit] of them.
+  final Map<String, (ImageStream, ImageStreamListener)> _warm = {};
   String? _precacheCenter;
 
   /// When a storyboard URL last failed to precache; retried after
@@ -439,8 +442,9 @@ class _NativeVideoPlayerProgressBarState
     _grow.duration = widget.style.expandDuration;
     _segmentSwitch.duration = widget.style.expandDuration;
     _preview.duration = widget.previewStyle.animationDuration;
-    if (oldWidget.storyboard != widget.storyboard) {
-      _precached.clear();
+    if (oldWidget.storyboard != widget.storyboard ||
+        oldWidget.storyboardPrecacheLimit != widget.storyboardPrecacheLimit) {
+      _releaseWarm();
       _precacheFailedAt.clear();
       _precacheCenter = null;
     }
@@ -448,6 +452,7 @@ class _NativeVideoPlayerProgressBarState
 
   @override
   void dispose() {
+    _releaseWarm();
     _releaseOverlayHold();
     _unlisten();
     _settleTimer?.cancel();
@@ -603,6 +608,8 @@ class _NativeVideoPlayerProgressBarState
 
   // ─── Precaching ─────────────────────────────────────────────────────
 
+  /// Keeps the sheets around [position] loaded (see [_warm]) and lets go
+  /// of the ones that are no longer near it.
   void _precacheAround(Duration position) {
     final storyboard = widget.storyboard;
     final limit = widget.storyboardPrecacheLimit;
@@ -613,39 +620,52 @@ class _NativeVideoPlayerProgressBarState
     final urls = storyboard.imageUrlsAround(position, limit: limit);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      for (final url in _warm.keys.toList()) {
+        if (!urls.contains(url)) _releaseSheet(url);
+      }
       final build =
           widget.storyboardImageProvider ??
           NativeVideoPlayerScrubPreview.defaultImageProvider;
+      final configuration = createLocalImageConfiguration(context);
       final now = DateTime.now();
       for (final url in urls) {
-        if (_precached.contains(url)) continue;
+        if (_warm.containsKey(url)) continue;
         final failedAt = _precacheFailedAt[url];
         if (failedAt != null &&
             now.difference(failedAt) < _precacheRetryAfter) {
           continue;
         }
-        _precached.add(url);
         final provider = build(url, widget.storyboardHeaders);
-        unawaited(
-          precacheImage(
-            provider,
-            context,
-            onError: (error, stackTrace) {
-              // Not cached: try again on a later scrub, after a pause.
-              _precached.remove(url);
-              _precacheFailedAt[url] = DateTime.now();
-              PaintingBinding.instance.imageCache.evict(provider);
-              _precacheCenter = null;
-            },
-          ),
+        final stream = provider.resolve(configuration);
+        late final ImageStreamListener listener;
+        listener = ImageStreamListener(
+          // The stream keeps its own image while we listen.
+          (info, synchronousCall) => info.dispose(),
+          onError: (error, stackTrace) {
+            // Not loaded: forget it and try again after a pause.
+            _precacheFailedAt[url] = DateTime.now();
+            PaintingBinding.instance.imageCache.evict(provider);
+            _precacheCenter = null;
+            scheduleMicrotask(() {
+              if (identical(_warm[url]?.$2, listener)) _releaseSheet(url);
+            });
+          },
         );
-      }
-      // Remember only the recent ones; older images may already have been
-      // evicted from the image cache and are loaded again when needed.
-      while (_precached.length > limit * 3) {
-        _precached.removeAt(0);
+        _warm[url] = (stream, listener);
+        stream.addListener(listener);
       }
     });
+  }
+
+  void _releaseSheet(String url) {
+    final entry = _warm.remove(url);
+    entry?.$1.removeListener(entry.$2);
+  }
+
+  void _releaseWarm() {
+    for (final url in _warm.keys.toList()) {
+      _releaseSheet(url);
+    }
   }
 
   /// Calls the preview/chapter callbacks after this frame when what they

@@ -46,8 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`thumbnailMaxHeight` bounds portrait ones), failed images are retried on
   a later scrub, and the bar's default `height` fits the bar (24 px).
 - Bunny storyboards without an `aspectRatio` measure the frame height from
-  each loaded sheet (`StoryboardThumbnail.regionIn`, `gridCell`), so portrait
-  videos show the right frame.
+  each loaded sheet (`StoryboardThumbnail.regionIn`, `gridCell`; sheets are
+  padded to the full 6 × 6 grid), so portrait videos show the right frame.
+- The progress bar keeps the storyboard sheets around the position loaded
+  (at most `storyboardPrecacheLimit`), so a busy image cache can't drop them
+  before the first scrub; while a sheet loads the bubble shows the time only.
 - `StoryboardThumbnails.bunnyFromPlaylistUrl(playlistUrl, duration:)`, which
   keeps a signed URL's token, and `headers:` on `StoryboardThumbnails.fromUrl`.
 

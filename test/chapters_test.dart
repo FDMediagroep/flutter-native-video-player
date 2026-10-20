@@ -257,12 +257,12 @@ Outro
         first.regionIn(const Size(1800, 3198)),
         const Rect.fromLTWH(300, 533, 300, 533),
       );
-      // The partly filled last sheet has 2 rows (9 frames, 6 per row);
-      // frame 44 is its 9th: column 2, row 1.
+      // Bunny pads the partly filled last sheet (9 frames) to the full
+      // 6 x 6 grid too; frame 44 is its 9th: column 2, row 1.
       final last = storyboard.thumbnailAt(const Duration(seconds: 88))!;
-      expect(last.gridCell!.rows, 2);
+      expect(last.gridCell!.rows, 6);
       expect(
-        last.regionIn(const Size(1800, 1066)),
+        last.regionIn(const Size(1800, 3198)),
         const Rect.fromLTWH(600, 533, 300, 533),
       );
       // With a known aspect ratio nothing is measured.
@@ -666,6 +666,100 @@ Outro
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
       });
+    });
+
+    testWidgets('sheets are loaded before playback and kept for the scrub', (
+      tester,
+    ) async {
+      final sheet = (await tester.runAsync(
+        () => createTestImage(width: 1600, height: 540),
+      ))!;
+      addTearDown(sheet.dispose);
+      _ReadyImage.loads = 0;
+      final storyboard = StoryboardThumbnails.fromUniformGrid(
+        // A URL no other test loaded, so it isn't in the image cache yet.
+        spriteUrls: const ['https://cdn.example.com/warm.jpg'],
+        frameInterval: const Duration(seconds: 10),
+        columns: 10,
+        frameWidth: 160,
+        frameHeight: 90,
+        framesPerSprite: 60,
+      );
+      await tester.pumpWidget(
+        host(
+          NativeVideoPlayerProgressBar(
+            // Not played yet: position zero, duration from the API.
+            position: Duration.zero,
+            duration: const Duration(seconds: 60),
+            storyboard: storyboard,
+            // Loads asynchronously, like a NetworkImage.
+            storyboardImageProvider: (url, _) =>
+                _ReadyImage(url, sheet, async: true),
+            onSeek: _ignoreSeek,
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(_ReadyImage.loads, 1, reason: 'loaded before any scrub');
+      // A busy app's other images may flush the cache; the bar's sheet
+      // stays live and is not loaded again.
+      PaintingBinding.instance.imageCache.clear();
+      final gesture = await tester.startGesture(at(tester, 100));
+      await gesture.moveTo(at(tester, 130));
+      await gesture.moveTo(at(tester, 150));
+      await tester.pump();
+      expect(_ReadyImage.loads, 1);
+      expect(
+        find.descendant(
+          of: find.byType(NativeVideoPlayerScrubPreview),
+          matching: find.byType(CustomPaint),
+        ),
+        findsOneWidget,
+        reason: 'the frame shows on the first scrub frame',
+      );
+      await gesture.up();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('while a sheet loads the bubble shows the time alone', (
+      tester,
+    ) async {
+      final storyboard = StoryboardThumbnails.fromUniformGrid(
+        spriteUrls: const ['https://cdn.example.com/slow.jpg'],
+        frameInterval: const Duration(seconds: 10),
+        columns: 10,
+        frameWidth: 160,
+        frameHeight: 90,
+        framesPerSprite: 60,
+      );
+      await tester.pumpWidget(
+        host(
+          NativeVideoPlayerProgressBar(
+            duration: const Duration(seconds: 60),
+            storyboard: storyboard,
+            storyboardImageProvider: (url, _) => _PendingImage(url),
+            onSeek: _ignoreSeek,
+          ),
+        ),
+      );
+      final gesture = await tester.startGesture(at(tester, 100));
+      await gesture.moveTo(at(tester, 130));
+      await gesture.moveTo(at(tester, 150));
+      await tester.pump();
+      final preview = find.byType(NativeVideoPlayerScrubPreview);
+      expect(
+        find.descendant(of: preview, matching: find.byType(CustomPaint)),
+        findsNothing,
+        reason: 'no empty frame',
+      );
+      expect(
+        find.descendant(of: preview, matching: find.textContaining(':')),
+        findsOneWidget,
+        reason: 'the time',
+      );
+      await gesture.up();
+      await tester.pumpAndSettle();
     });
 
     testWidgets('a storyboard image that failed is fetched again later', (
@@ -1160,25 +1254,51 @@ class _FailingImage extends ImageProvider<_FailingImage> {
 
 /// An image that is already decoded, for frame layout tests.
 class _ReadyImage extends ImageProvider<_ReadyImage> {
-  const _ReadyImage(this.url, this.image);
+  const _ReadyImage(this.url, this.image, {this.async = false});
 
   final String url;
   final ui.Image image;
+  final bool async;
+  static int loads = 0;
 
   @override
   Future<_ReadyImage> obtainKey(ImageConfiguration configuration) =>
       SynchronousFuture(this);
 
   @override
-  ImageStreamCompleter loadImage(
-    _ReadyImage key,
-    ImageDecoderCallback decode,
-  ) => OneFrameImageStreamCompleter(
-    SynchronousFuture(ImageInfo(image: image.clone())),
-  );
+  ImageStreamCompleter loadImage(_ReadyImage key, ImageDecoderCallback decode) {
+    loads++;
+    final info = ImageInfo(image: image.clone());
+    return OneFrameImageStreamCompleter(
+      async ? Future.value(info) : SynchronousFuture(info),
+    );
+  }
 
   @override
   bool operator ==(Object other) => other is _ReadyImage && other.url == url;
+
+  @override
+  int get hashCode => url.hashCode;
+}
+
+/// An image that never finishes loading.
+class _PendingImage extends ImageProvider<_PendingImage> {
+  const _PendingImage(this.url);
+
+  final String url;
+
+  @override
+  Future<_PendingImage> obtainKey(ImageConfiguration configuration) =>
+      SynchronousFuture(this);
+
+  @override
+  ImageStreamCompleter loadImage(
+    _PendingImage key,
+    ImageDecoderCallback decode,
+  ) => OneFrameImageStreamCompleter(Completer<ImageInfo>().future);
+
+  @override
+  bool operator ==(Object other) => other is _PendingImage && other.url == url;
 
   @override
   int get hashCode => url.hashCode;
