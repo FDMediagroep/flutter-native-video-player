@@ -16,10 +16,13 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.support.v4.media.session.MediaSessionCompat
+import androidx.annotation.OptIn
 import androidx.core.app.NotificationCompat
 import androidx.media.app.NotificationCompat as MediaNotificationCompat
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionToken
@@ -36,13 +39,56 @@ import java.net.URL
 class VideoPlayerNotificationHandler(
     private val context: Context,
     private val player: ExoPlayer,
-    private var eventHandler: VideoPlayerEventHandler
+    private var eventHandler: VideoPlayerEventHandler,
+    private val showSkipButtons: Boolean = true
 ) {
     companion object {
         private const val TAG = "VideoPlayerNotification"
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "video_player_channel"
         private var sessionCounter = 0
+
+        // The PiP window (and system media controls) show skip buttons for these.
+        private val SKIP_COMMANDS = intArrayOf(
+            Player.COMMAND_SEEK_TO_PREVIOUS,
+            Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
+            Player.COMMAND_SEEK_TO_NEXT,
+            Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+            Player.COMMAND_SEEK_BACK,
+            Player.COMMAND_SEEK_FORWARD
+        )
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun buildSessionPlayer(): Player {
+        if (showSkipButtons) return player
+        return object : ForwardingPlayer(player) {
+            private val listeners = mutableMapOf<Player.Listener, Player.Listener>()
+
+            override fun getAvailableCommands(): Player.Commands =
+                super.getAvailableCommands().buildUpon().removeAll(*SKIP_COMMANDS).build()
+
+            override fun isCommandAvailable(command: Int): Boolean =
+                command !in SKIP_COMMANDS && super.isCommandAvailable(command)
+
+            override fun addListener(listener: Player.Listener) {
+                val forwardingListener = listeners.getOrPut(listener) {
+                    object : Player.Listener by listener {
+                        override fun onAvailableCommandsChanged(availableCommands: Player.Commands) {
+                            listener.onAvailableCommandsChanged(
+                                availableCommands.buildUpon().removeAll(*SKIP_COMMANDS).build()
+                            )
+                        }
+                    }
+                }
+                super.addListener(forwardingListener)
+            }
+
+            override fun removeListener(listener: Player.Listener) {
+                val forwardingListener = listeners.remove(listener) ?: return
+                super.removeListener(forwardingListener)
+            }
+        }
     }
 
     /**
@@ -237,7 +283,7 @@ class VideoPlayerNotificationHandler(
 
         // Create MediaSession with unique session ID and activity (opens app when notification is tapped)
         val sessionId = "huddle_video_player_${++sessionCounter}"
-        mediaSession = MediaSession.Builder(context, player)
+        mediaSession = MediaSession.Builder(context, buildSessionPlayer())
             .setId(sessionId)
             .setSessionActivity(pendingIntent)
             .build()
