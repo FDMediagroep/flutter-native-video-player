@@ -211,7 +211,11 @@ extension VideoPlayerView: AVPlayerViewControllerDelegate {
 
     // Automatic PiP: the same restore path as the manual one (handlePipRestoreRequest).
     public func playerViewController(_ playerViewController: AVPlayerViewController, restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
-        handlePipRestoreRequest(completionHandler)
+        if #available(iOS 14.0, *) {
+            handlePipRestoreRequest(completionHandler)
+        } else {
+            completionHandler(true)
+        }
     }
 
     public func playerViewController(_ playerViewController: AVPlayerViewController, failedToStartPictureInPictureWithError error: Error) {
@@ -556,7 +560,11 @@ extension VideoPlayerView: AVPictureInPictureControllerDelegate {
     }
     
     public func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
-        handlePipRestoreRequest(completionHandler)
+        if #available(iOS 14.0, *) {
+            handlePipRestoreRequest(completionHandler)
+        } else {
+            completionHandler(true)
+        }
     }
 
     /// The PiP window is closing back into the app: the user tapped its
