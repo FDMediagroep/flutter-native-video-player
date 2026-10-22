@@ -242,6 +242,8 @@ class NativeVideoPlayerPlugin(
                 view.handleMethodCall(call, result)
             } else if (call.method == "pause" && pauseWithoutView(args)) {
                 result.success(true)
+            } else if (call.method == "setMediaInfo" && setMediaInfoWithoutView(args)) {
+                result.success(null)
             } else {
                 result.error("NO_VIEW", "No view found for method call", null)
             }
@@ -305,6 +307,25 @@ class NativeVideoPlayerPlugin(
         val player = sharedPlayerManager.getExistingPlayer(controllerId) ?: return false
         player.pause()
         NpLog.d(TAG, "Paused controller $controllerId without a view")
+        return true
+    }
+
+    /**
+     * Updates a controller's Now Playing metadata when no view is routable,
+     * e.g. background playback after the screen closed. Stored even without
+     * a player so a view created later for this controller ID picks it up.
+     */
+    private fun setMediaInfoWithoutView(args: Map<*, *>?): Boolean {
+        val controllerId = (args?.get("controllerId") as? Number)?.toInt() ?: return false
+        @Suppress("UNCHECKED_CAST")
+        val mediaInfo = args["mediaInfo"] as? Map<String, Any> ?: return false
+        sharedPlayerManager.setMediaInfo(controllerId, mediaInfo)
+        val player = sharedPlayerManager.getExistingPlayer(controllerId)
+        if (player?.currentMediaItem != null) {
+            sharedPlayerManager.getExistingNotificationHandler(controllerId)
+                ?.setupMediaSession(mediaInfo)
+        }
+        NpLog.d(TAG, "Updated media info of controller $controllerId without a view")
         return true
     }
 

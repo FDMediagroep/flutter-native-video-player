@@ -61,7 +61,7 @@ class NativeVideoPlayerController {
   NativeVideoPlayerController({
     required this.id,
     this.autoPlay = false,
-    this.mediaInfo,
+    NativeVideoPlayerMediaInfo? mediaInfo,
     this.allowsPictureInPicture = true,
     this.canStartPictureInPictureAutomatically = true,
     this.lockToLandscape = true,
@@ -71,7 +71,7 @@ class NativeVideoPlayerController {
     this.preventFullscreenSwipeDismiss = true,
     this.fullscreenFlightBorderRadius = BorderRadius.zero,
     List<DeviceOrientation>? preferredOrientations,
-  }) {
+  }) : _mediaInfo = mediaInfo {
     // Set preferred orientations if provided
     if (preferredOrientations != null) {
       FullscreenManager.setPreferredOrientations(preferredOrientations);
@@ -143,7 +143,44 @@ class NativeVideoPlayerController {
   final bool lockToLandscape;
 
   /// Optional media information (title, subtitle, artwork) for Now Playing display
-  final NativeVideoPlayerMediaInfo? mediaInfo;
+  ///
+  /// Use [updateMediaInfo] to change it while a video is playing.
+  NativeVideoPlayerMediaInfo? get mediaInfo => _mediaInfo;
+  NativeVideoPlayerMediaInfo? _mediaInfo;
+
+  /// Replaces the Now Playing / media-notification metadata of the currently
+  /// playing item without interrupting playback.
+  ///
+  /// Useful for live streams where the track changes while the same video URL keeps
+  /// playing. Fields left `null` are cleared on the lock screen and Control Center,
+  /// so use [NativeVideoPlayerMediaInfo.copyWith] to only change parts:
+  ///
+  /// ```dart
+  /// await controller.updateMediaInfo(
+  ///   controller.mediaInfo!.copyWith(title: nowPlayingSong),
+  /// );
+  /// ```
+  ///
+  /// Safe to call before the platform view exists: the value is stored and
+  /// applied when the player is created.
+  Future<void> updateMediaInfo(NativeVideoPlayerMediaInfo mediaInfo) async {
+    if (_isDisposed) {
+      return;
+    }
+
+    // Not deduplicated: other controllers with this ID may have changed the
+    // shared native player's metadata since.
+    _mediaInfo = mediaInfo;
+    final VideoPlayerMethodChannel? channel = _methodChannel;
+    if (channel != null) {
+      await channel.setMediaInfo(mediaInfo.toMap());
+    } else {
+      await VideoPlayerMethodChannel.setMediaInfoForController(
+        id,
+        mediaInfo.toMap(),
+      );
+    }
+  }
 
   /// Whether Picture-in-Picture mode is allowed
   final bool allowsPictureInPicture;

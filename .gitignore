@@ -58,6 +58,7 @@ app.*.map.json
 **/ios/**/DerivedData/
 **/ios/**/Icon?
 **/ios/**/Pods/
+**/ios/**/.build/
 **/ios/**/.symlinks/
 **/ios/**/profile
 **/ios/**/xcuserdata

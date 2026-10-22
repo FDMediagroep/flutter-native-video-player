@@ -53,8 +53,23 @@ class PlayerBackendSession(
     val methodHandler: VideoPlayerMethodHandler
     val observer: VideoPlayerObserver
 
-    var currentMediaInfo: Map<String, Any>? = null
-        private set
+    private var localMediaInfo: Map<String, Any>? = null
+
+    /**
+     * Now Playing metadata for the current item. Backed by [SharedPlayerManager]
+     * for shared controllers so a `setMediaInfo` update reaches every backend —
+     * otherwise a sibling would push its stale copy back on the next state change.
+     */
+    var currentMediaInfo: Map<String, Any>?
+        get() = controllerId?.let { sharedPlayerManager.getMediaInfo(it) } ?: localMediaInfo
+        private set(value) {
+            localMediaInfo = value
+            // Disposal clears the local copy but must not wipe the shared one
+            // while sibling backends are still alive.
+            if (controllerId != null && value != null) {
+                sharedPlayerManager.setMediaInfo(controllerId, value)
+            }
+        }
 
     private val eventChannel: EventChannel
 
@@ -70,9 +85,10 @@ class PlayerBackendSession(
         private set
 
     init {
-        // Extract and store media info from args (if provided during initialization)
-        // This ensures we have the correct media info even for shared players
-        currentMediaInfo = args?.get("mediaInfo") as? Map<String, Any>
+        // A sibling's creation args may predate a setMediaInfo/load on the
+        // shared player, so existing shared metadata wins over them.
+        currentMediaInfo = controllerId?.let { sharedPlayerManager.getMediaInfo(it) }
+            ?: args?.get("mediaInfo") as? Map<String, Any>
         currentMediaInfo?.let { mediaInfo ->
             val title = mediaInfo["title"] as? String
             NpLog.d(TAG, "📱 Stored media info during init: $title")

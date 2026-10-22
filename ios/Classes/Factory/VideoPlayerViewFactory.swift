@@ -246,6 +246,20 @@ import UIKit
                 SharedPlayerManager.shared.setPlaybackRequested(false, for: controllerId)
                 npLog("⏸️ Paused controller \(controllerId) without a view")
                 result(true)
+            } else if call.method == "setMediaInfo",
+                      let args = call.arguments as? [String: Any],
+                      let controllerId = args["controllerId"] as? Int,
+                      let mediaInfo = args["mediaInfo"] as? [String: Any] {
+                // No routable view. A view kept alive for an open PiP window
+                // still drives Now Playing; otherwise the cache is read by the
+                // next view created for this controller ID.
+                if let view = SharedPlayerManager.shared.findAllViewsForController(controllerId).first {
+                    view.applyUpdatedMediaInfo(mediaInfo)
+                } else {
+                    SharedPlayerManager.shared.setMediaInfo(for: controllerId, mediaInfo: mediaInfo)
+                }
+                npLog("📱 Updated media info of controller \(controllerId) without a routable view")
+                result(nil)
             } else {
                 result(FlutterError(code: "NO_VIEW", message: "No view found for method call", details: nil))
             }

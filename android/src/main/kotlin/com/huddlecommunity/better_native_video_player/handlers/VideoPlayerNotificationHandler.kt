@@ -2,6 +2,7 @@ package com.huddlecommunity.better_native_video_player.handlers
 
 import com.huddlecommunity.better_native_video_player.NpLog
 import com.huddlecommunity.better_native_video_player.VideoPlayerMediaSessionService
+import com.huddlecommunity.better_native_video_player.VideoPlayerNotificationActionReceiver
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -12,27 +13,29 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.support.v4.media.session.MediaSessionCompat
 import androidx.core.app.NotificationCompat
-import androidx.media.app.NotificationCompat as MediaNotificationCompat
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
-import androidx.media3.session.SessionToken
+import androidx.media3.session.MediaStyleNotificationHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.lang.ref.WeakReference
 import java.net.URL
 
 /**
  * Handles MediaSession and notification controls for lock screen and notification area
  * Equivalent to iOS VideoPlayerNowPlayingHandler
  */
+@UnstableApi
 class VideoPlayerNotificationHandler(
     private val context: Context,
     private val player: ExoPlayer,
@@ -43,7 +46,27 @@ class VideoPlayerNotificationHandler(
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "video_player_channel"
         private var sessionCounter = 0
+
+        // All handlers share NOTIFICATION_ID; this is the one whose content is currently posted.
+        // Only touched on the main thread. Held weakly so a handler that is never
+        // released (and its context/player/session) is not pinned by this static field.
+        private var notificationOwnerRef: WeakReference<VideoPlayerNotificationHandler>? = null
+
+        private var notificationOwner: VideoPlayerNotificationHandler?
+            get() = notificationOwnerRef?.get()
+            set(value) {
+                notificationOwnerRef = value?.let { WeakReference(it) }
+            }
     }
+
+    private fun isNotificationOwner(): Boolean = notificationOwner === this
+
+    // Skip when the notification was already cancelled (ended/idle). A paused player only
+    // refreshes if it still owns the shared notification, so it can't overwrite another one.
+    private fun shouldRefreshNotification(): Boolean =
+        player.playbackState != Player.STATE_IDLE &&
+            player.playbackState != Player.STATE_ENDED &&
+            (player.playWhenReady || isNotificationOwner())
 
     /**
      * The status-bar small icon must be a flat, alpha-only drawable — Android tints it, so a
@@ -88,9 +111,14 @@ class VideoPlayerNotificationHandler(
     // Store current metadata separately to avoid reading stale data from player
     private var currentTitle: String = "Video"
     private var currentSubtitle: String = ""
+    private var currentAlbum: String = ""
 
     init {
         createNotificationChannel()
+    }
+
+    private val playPauseCommand: (Boolean) -> Unit = { play ->
+        if (play) player.play() else player.pause()
     }
 
     private val playerListener = object : Player.Listener {
@@ -160,6 +188,9 @@ class VideoPlayerNotificationHandler(
         (mediaInfo["title"] as? String)?.let { metadataBuilder.setTitle(it) }
         (mediaInfo["subtitle"] as? String)?.let { metadataBuilder.setArtist(it) }
         (mediaInfo["album"] as? String)?.let { metadataBuilder.setAlbumTitle(it) }
+        (mediaInfo["artworkUrl"] as? String)?.takeIf { it.isNotEmpty() }?.let {
+            metadataBuilder.setArtworkUri(Uri.parse(it))
+        }
 
         // Create updated MediaItem with new metadata
         val updatedItem = currentItem.buildUpon()
@@ -170,7 +201,11 @@ class VideoPlayerNotificationHandler(
         val wasPlaying = player.isPlaying
         val position = player.currentPosition
         player.replaceMediaItem(player.currentMediaItemIndex, updatedItem)
-        player.seekTo(position)
+        // A live stream has no meaningful absolute position to restore.
+        // Seeking back after replacing would drop the player off the live edge.
+        if (!player.isCurrentMediaItemLive && player.currentPosition != position) {
+            player.seekTo(position)
+        }
         if (wasPlaying) player.play()
 
         NpLog.d(TAG, "Updated player MediaItem metadata - title: ${mediaInfo["title"]}, subtitle: ${mediaInfo["subtitle"]}")
@@ -185,13 +220,20 @@ class VideoPlayerNotificationHandler(
         // Extract metadata from the provided info
         val newTitle = (mediaInfo?.get("title") as? String) ?: "Video"
         val newSubtitle = (mediaInfo?.get("subtitle") as? String) ?: ""
+        val newAlbum = (mediaInfo?.get("album") as? String) ?: ""
+        val newArtworkUrl = mediaInfo?.get("artworkUrl") as? String
 
         // Check if media info has actually changed to avoid unnecessary updates
-        val mediaInfoChanged = (newTitle != currentTitle || newSubtitle != currentSubtitle)
+        val artworkChanged = newArtworkUrl != currentArtworkUrl
+        val mediaInfoChanged = newTitle != currentTitle ||
+                newSubtitle != currentSubtitle ||
+                newAlbum != currentAlbum ||
+                artworkChanged
 
         // Store the new metadata
         currentTitle = newTitle
         currentSubtitle = newSubtitle
+        currentAlbum = newAlbum
         NpLog.d(TAG, "📱 Media info - title: $currentTitle, subtitle: $currentSubtitle, changed: $mediaInfoChanged")
 
         // If MediaSession already exists, only update if media info changed
@@ -199,8 +241,12 @@ class VideoPlayerNotificationHandler(
             // Only update MediaItem if the info actually changed to avoid playback interruptions
             if (mediaInfoChanged) {
                 NpLog.d(TAG, "📱 MediaSession exists - media info changed, updating metadata")
-                currentArtwork = null // Clear old artwork
-                currentArtworkUrl = null // Clear artwork URL to ignore pending loads
+                // Keep the current bitmap when the URL is unchanged, so a
+                // metadata update doesn't blank the notification artwork.
+                if (artworkChanged) {
+                    currentArtwork = null // Clear old artwork
+                    currentArtworkUrl = null // Clear artwork URL to ignore pending loads
+                }
 
                 // Update the player's MediaItem with the new metadata
                 updatePlayerMediaItemMetadata(mediaInfo)
@@ -212,7 +258,7 @@ class VideoPlayerNotificationHandler(
 
                 // Update notification with new info
                 handler.post {
-                    if (player.playWhenReady) {
+                    if (shouldRefreshNotification()) {
                         updateNotification()
                         NpLog.d(TAG, "✅ Notification updated with new media info")
                     }
@@ -260,6 +306,13 @@ class VideoPlayerNotificationHandler(
 
         // Start periodic position updates
         startPositionUpdates()
+
+        // Play/READY may have fired before this session existed; publish now.
+        handler.post {
+            if (shouldRefreshNotification()) {
+                updateNotification()
+            }
+        }
     }
 
     /**
@@ -277,6 +330,7 @@ class VideoPlayerNotificationHandler(
             } else {
                 notificationManager.notify(NOTIFICATION_ID, notification)
             }
+            notificationOwner = this
             NpLog.d(TAG, "Notification shown/updated (playing=${player.playWhenReady})")
         } catch (e: Exception) {
             NpLog.e(TAG, "Error showing notification: ${e.message}", e)
@@ -295,6 +349,7 @@ class VideoPlayerNotificationHandler(
      */
     private fun hideNotification() {
         notificationManager.cancel(NOTIFICATION_ID)
+        notificationOwner = null
         NpLog.d(TAG, "Notification hidden")
     }
 
@@ -326,18 +381,10 @@ class VideoPlayerNotificationHandler(
 
         val iconResId = resolveSmallIconRes()
 
-        // Convert Media3 SessionToken to MediaSessionCompat.Token for notification
-        // Media3 1.4.0+ requires us to extract the token differently
-        val token = try {
-            // Use reflection to access the session compat token
-            val method = session.javaClass.getMethod("getSessionCompatToken")
-            method.invoke(session) as? MediaSessionCompat.Token
-        } catch (e: Exception) {
-            // If reflection fails (Media3 1.4.0+), create a token from the session's underlying binder
-            NpLog.w(TAG, "getSessionCompatToken not available, using alternative method")
-            null
-        }
-
+        // MediaStyle is what turns this into a media notification: System UI then
+        // derives the transport controls from the session's PlaybackState
+        // (on API 33+) instead of rendering a plain text notification.
+        val style = MediaStyleNotificationHelper.MediaStyle(session)
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(artist)
@@ -348,19 +395,38 @@ class VideoPlayerNotificationHandler(
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
 
-        // Only set media session token if we successfully obtained it
-        if (token != null) {
-            builder.setStyle(
-                MediaNotificationCompat.MediaStyle()
-                    .setMediaSession(token)
+        // Below API 33 System UI renders the buttons from the notification's actions,
+        // not from the session's PlaybackState, so we add the play/pause button explicitly.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            // Handlers share one static receiver/NOTIFICATION_ID, so reassigning on
+            // every build to keep the button targeting whichever session is visible.
+            VideoPlayerNotificationActionReceiver.setPlayPauseCommand(playPauseCommand)
+
+            val playing = player.playWhenReady
+            builder.addAction(
+                if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+                if (playing) "Pause" else "Play",
+                playPauseIntent(play = !playing)
             )
-        } else {
-            // Fallback: create notification without media session integration
-            // Controls will still work through MediaSession, just not integrated in notification
-            NpLog.w(TAG, "Creating notification without MediaSession token integration")
+            style.setShowActionsInCompactView(0)
         }
 
-        return builder.build()
+        return builder.setStyle(style).build()
+    }
+
+    private fun playPauseIntent(play: Boolean): PendingIntent {
+        val action = if (play) {
+            VideoPlayerNotificationActionReceiver.ACTION_PLAY
+        } else {
+            VideoPlayerNotificationActionReceiver.ACTION_PAUSE
+        }
+        val intent = Intent(context, VideoPlayerNotificationActionReceiver::class.java).setAction(action)
+        return PendingIntent.getBroadcast(
+            context,
+            if (play) 1 else 2,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
     }
 
     /**
@@ -372,6 +438,9 @@ class VideoPlayerNotificationHandler(
         // Load artwork asynchronously if present and update the notification
         val artworkUrl = mediaInfo["artworkUrl"] as? String
         if (artworkUrl != null) {
+            if (artworkUrl == currentArtworkUrl && currentArtwork != null) {
+                return
+            }
             currentArtworkUrl = artworkUrl // Track the current artwork URL
             loadArtwork(artworkUrl) { bitmap ->
                 // Only use this artwork if it's still the current one (prevent race conditions)
@@ -386,13 +455,13 @@ class VideoPlayerNotificationHandler(
                     // Update notification directly with the new artwork
                     // DO NOT call replaceMediaItem here as it can interrupt playback
                     // The notification will use currentArtwork automatically
-                    if (player.playWhenReady) {
-                        handler.post {
+                    handler.post {
+                        if (artworkUrl == currentArtworkUrl && shouldRefreshNotification()) {
                             updateNotification()
                             NpLog.d(TAG, "Artwork loaded and notification updated for $artworkUrl")
+                        } else {
+                            NpLog.d(TAG, "Artwork loaded, notification not refreshed for $artworkUrl")
                         }
-                    } else {
-                        NpLog.d(TAG, "Artwork loaded but player not ready, will show on next play")
                     }
                 }
             }
@@ -422,15 +491,6 @@ class VideoPlayerNotificationHandler(
     }
 
     /**
-     * Converts Bitmap to ByteArray
-     */
-    private fun bitmapToByteArray(bitmap: Bitmap): ByteArray {
-        val stream = java.io.ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
-        return stream.toByteArray()
-    }
-
-    /**
      * Starts periodic position updates (every second)
      */
     private fun startPositionUpdates() {
@@ -455,12 +515,14 @@ class VideoPlayerNotificationHandler(
      * Releases MediaSession and hides notification
      */
     fun release(removeNotification: Boolean = true) {
+        VideoPlayerNotificationActionReceiver.clearPlayPauseCommand(playPauseCommand)
         stopPositionUpdates()
         player.removeListener(playerListener)
         if (removeNotification) {
             VideoPlayerMediaSessionService.stop(context, removeNotification = true)
             hideNotification()
         }
+        if (isNotificationOwner()) notificationOwner = null
 
         mediaSession?.release()
         mediaSession = null
