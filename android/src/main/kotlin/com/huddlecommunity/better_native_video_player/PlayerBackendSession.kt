@@ -85,9 +85,10 @@ class PlayerBackendSession(
         private set
 
     init {
-        // Extract and store media info from args (if provided during initialization)
-        // This ensures we have the correct media info even for shared players
-        currentMediaInfo = args?.get("mediaInfo") as? Map<String, Any>
+        // A sibling's creation args may predate a setMediaInfo/load on the
+        // shared player, so existing shared metadata wins over them.
+        currentMediaInfo = controllerId?.let { sharedPlayerManager.getMediaInfo(it) }
+            ?: args?.get("mediaInfo") as? Map<String, Any>
         currentMediaInfo?.let { mediaInfo ->
             val title = mediaInfo["title"] as? String
             NpLog.d(TAG, "📱 Stored media info during init: $title")

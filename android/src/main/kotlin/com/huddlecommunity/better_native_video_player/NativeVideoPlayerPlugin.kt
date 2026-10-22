@@ -311,17 +311,17 @@ class NativeVideoPlayerPlugin(
     }
 
     /**
-     * Updates a controller's Now Playing metadata when its last view is gone
-     * but the shared player (and its media notification) lives on, e.g.
-     * background playback after the screen closed.
+     * Updates a controller's Now Playing metadata when no view is routable,
+     * e.g. background playback after the screen closed. Stored even without
+     * a player so a view created later for this controller ID picks it up.
      */
     private fun setMediaInfoWithoutView(args: Map<*, *>?): Boolean {
         val controllerId = (args?.get("controllerId") as? Number)?.toInt() ?: return false
         @Suppress("UNCHECKED_CAST")
         val mediaInfo = args["mediaInfo"] as? Map<String, Any> ?: return false
-        val player = sharedPlayerManager.getExistingPlayer(controllerId) ?: return false
         sharedPlayerManager.setMediaInfo(controllerId, mediaInfo)
-        if (player.currentMediaItem != null) {
+        val player = sharedPlayerManager.getExistingPlayer(controllerId)
+        if (player?.currentMediaItem != null) {
             sharedPlayerManager.getExistingNotificationHandler(controllerId)
                 ?.setupMediaSession(mediaInfo)
         }

@@ -485,9 +485,13 @@ import QuartzCore
                 npLog("⚠️ Automatic PiP requires iOS 14.2+, current device doesn't support it")
             }
 
-            // Store media info if provided during initialization
-            // This ensures we have the correct media info even for shared players
-            if let mediaInfo = args["mediaInfo"] as? [String: Any] {
+            // A sibling's creation args may predate a setMediaInfo/load on the
+            // shared player, so existing shared metadata wins over them.
+            if let controllerIdValue = controllerId,
+               let sharedMediaInfo = SharedPlayerManager.shared.getMediaInfo(for: controllerIdValue) {
+                currentMediaInfo = sharedMediaInfo
+                npLog("📱 Using shared media info during init: \(sharedMediaInfo["title"] ?? "Unknown")")
+            } else if let mediaInfo = args["mediaInfo"] as? [String: Any] {
                 currentMediaInfo = mediaInfo
                 npLog("📱 Stored media info during init: \(mediaInfo["title"] ?? "Unknown")")
 

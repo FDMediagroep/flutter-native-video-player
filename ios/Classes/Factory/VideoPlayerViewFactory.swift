@@ -249,10 +249,10 @@ import UIKit
             } else if call.method == "setMediaInfo",
                       let args = call.arguments as? [String: Any],
                       let controllerId = args["controllerId"] as? Int,
-                      let mediaInfo = args["mediaInfo"] as? [String: Any],
-                      SharedPlayerManager.shared.existingPlayer(for: controllerId) != nil {
-                // No routable view, but the shared player lives on. A view
-                // kept alive for an open PiP window still drives Now Playing.
+                      let mediaInfo = args["mediaInfo"] as? [String: Any] {
+                // No routable view. A view kept alive for an open PiP window
+                // still drives Now Playing; otherwise the cache is read by the
+                // next view created for this controller ID.
                 if let view = SharedPlayerManager.shared.findAllViewsForController(controllerId).first {
                     view.applyUpdatedMediaInfo(mediaInfo)
                 } else {
