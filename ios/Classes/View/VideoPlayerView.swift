@@ -1434,26 +1434,15 @@ import QuartzCore
             return
         }
 
-        // Check if we have media info to restore
-        var mediaInfo = currentMediaInfo
-
-        // Fallback: Try to retrieve from SharedPlayerManager if not available locally
-        if mediaInfo == nil, let controllerIdValue = controllerId {
-            mediaInfo = SharedPlayerManager.shared.getMediaInfo(for: controllerIdValue)
-            if mediaInfo != nil {
-                npLog("   → Retrieved media info from SharedPlayerManager")
-                currentMediaInfo = mediaInfo // Update local copy
-            }
-        }
-
-        guard let mediaInfo = mediaInfo else {
+        guard latestMediaInfo() != nil else {
             npLog("   ⚠️ No media info available to restore")
             return
         }
 
         // Delay slightly to ensure audio session is fully active
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            guard let self = self else { return }
+            // Re-read: setMediaInfo may have run during the delay.
+            guard let self = self, let mediaInfo = self.latestMediaInfo() else { return }
             // Restore Now Playing info
             npLog("   → Restoring Now Playing info: \(mediaInfo["title"] ?? "Unknown")")
             self.setupNowPlayingInfo(mediaInfo: mediaInfo)
@@ -1517,16 +1506,14 @@ import QuartzCore
 
             // Restore Now Playing info and resume playback if needed
             if RemoteCommandManager.shared.isOwner(viewId) {
-                var mediaInfo = currentMediaInfo
-                if mediaInfo == nil, let controllerIdValue = controllerId {
-                    mediaInfo = SharedPlayerManager.shared.getMediaInfo(for: controllerIdValue)
-                }
-
-                if let mediaInfo = mediaInfo {
+                if latestMediaInfo() != nil {
                     npLog("   → Restoring Now Playing info after interruption")
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                         guard let self = self else { return }
-                        self.setupNowPlayingInfo(mediaInfo: mediaInfo)
+                        // Re-read: setMediaInfo may have run during the delay.
+                        if let mediaInfo = self.latestMediaInfo() {
+                            self.setupNowPlayingInfo(mediaInfo: mediaInfo)
+                        }
                         self.updateNowPlayingPlaybackTime()
 
                         // Auto-resume playback if the system recommends it
@@ -1541,6 +1528,16 @@ import QuartzCore
         @unknown default:
             break
         }
+    }
+
+    /// Local media info, falling back to (and caching) the controller's shared copy.
+    private func latestMediaInfo() -> [String: Any]? {
+        if let mediaInfo = currentMediaInfo { return mediaInfo }
+        guard let controllerIdValue = controllerId,
+              let mediaInfo = SharedPlayerManager.shared.getMediaInfo(for: controllerIdValue)
+        else { return nil }
+        currentMediaInfo = mediaInfo
+        return mediaInfo
     }
 }
 

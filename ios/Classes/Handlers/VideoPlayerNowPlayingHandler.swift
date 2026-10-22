@@ -228,12 +228,16 @@ extension VideoPlayerView {
         // Only push to Control Center when this view actually drives Now Playing;
         // an idle player must not hijack another app's lock screen. The stored
         // info is applied by the observer once playback starts.
-        if RemoteCommandManager.shared.isOwner(viewId) || (player?.rate ?? 0) > 0 {
+        // Route through the existing owner first: sibling views share the AVPlayer
+        // and would also pass the rate check, stealing ownership from it.
+        if RemoteCommandManager.shared.isOwner(viewId) {
             setupNowPlayingInfo(mediaInfo: mediaInfo)
         } else if let controllerIdValue = controllerId,
                   let ownerView = SharedPlayerManager.shared.findAllViewsForController(controllerIdValue)
             .first(where: { RemoteCommandManager.shared.isOwner($0.viewId) }) {
             ownerView.setupNowPlayingInfo(mediaInfo: mediaInfo)
+        } else if (player?.rate ?? 0) > 0 {
+            setupNowPlayingInfo(mediaInfo: mediaInfo)
         }
     }
 

@@ -627,6 +627,44 @@ void main() {
         });
       },
     );
+
+    testWidgets(
+      'updateMediaInfo is forwarded even when this controller already has it',
+      (tester) async {
+        // Controllers sharing an ID share one native player: another one may
+        // have changed its metadata since.
+        await tester.runAsync(() async {
+          final List<String?> titles = <String?>[];
+          messenger.setMockMethodCallHandler(methodChannel, (call) async {
+            if (call.method == 'setMediaInfo') {
+              final args = call.arguments as Map<Object?, Object?>;
+              titles.add(
+                (args['mediaInfo'] as Map<Object?, Object?>?)?['title']
+                    as String?,
+              );
+            }
+            return null;
+          });
+          mockControllerStream(20);
+
+          const a = NativeVideoPlayerMediaInfo(title: 'A');
+          final first = NativeVideoPlayerController(id: 20, mediaInfo: a);
+          final second = NativeVideoPlayerController(id: 20, mediaInfo: a);
+          await flushSetup(first);
+          await flushSetup(second);
+
+          await first.updateMediaInfo(
+            const NativeVideoPlayerMediaInfo(title: 'B'),
+          );
+          await second.updateMediaInfo(a);
+          expect(titles, <String?>['B', 'A']);
+
+          await first.dispose();
+          await second.dispose();
+          expect(flutterErrors, isEmpty);
+        });
+      },
+    );
   });
 
   group('embedded caption text scale', () {

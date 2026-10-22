@@ -168,10 +168,8 @@ class NativeVideoPlayerController {
       return;
     }
 
-    if (_mediaInfo == mediaInfo) {
-      return;
-    }
-
+    // Not deduplicated: other controllers with this ID may have changed the
+    // shared native player's metadata since.
     _mediaInfo = mediaInfo;
     final VideoPlayerMethodChannel? channel = _methodChannel;
     if (channel != null) {
