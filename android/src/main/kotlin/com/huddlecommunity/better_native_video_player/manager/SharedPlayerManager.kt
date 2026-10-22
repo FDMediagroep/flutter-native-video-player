@@ -310,6 +310,12 @@ class SharedPlayerManager {
     fun getExistingPlayer(controllerId: Int): ExoPlayer? = players[controllerId]
 
     /**
+     * The notification handler for [controllerId], without creating one.
+     */
+    fun getExistingNotificationHandler(controllerId: Int): VideoPlayerNotificationHandler? =
+        notificationHandlers[controllerId]
+
+    /**
      * Removes a player (called when explicitly disposed)
      */
     fun removePlayer(context: Context, controllerId: Int) {

@@ -169,7 +169,15 @@ class NativeVideoPlayerController {
     }
 
     _mediaInfo = mediaInfo;
-    await _methodChannel?.setMediaInfo(mediaInfo.toMap());
+    final VideoPlayerMethodChannel? channel = _methodChannel;
+    if (channel != null) {
+      await channel.setMediaInfo(mediaInfo.toMap());
+    } else {
+      await VideoPlayerMethodChannel.setMediaInfoForController(
+        id,
+        mediaInfo.toMap(),
+      );
+    }
   }
 
   /// Whether Picture-in-Picture mode is allowed

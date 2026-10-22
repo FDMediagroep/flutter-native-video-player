@@ -577,6 +577,56 @@ void main() {
         });
       },
     );
+
+    testWidgets(
+      'updateMediaInfo is routed by controller ID with and without a view',
+      (tester) async {
+        // The native side resolves the controller's shared player when the
+        // view is gone, so background playback's notification still updates.
+        await tester.pumpWidget(const SizedBox());
+        final context = tester.element(find.byType(SizedBox));
+
+        await tester.runAsync(() async {
+          final List<Map<Object?, Object?>?> mediaInfoCalls =
+              <Map<Object?, Object?>?>[];
+          messenger.setMockMethodCallHandler(methodChannel, (call) async {
+            if (call.method == 'setMediaInfo') {
+              mediaInfoCalls.add(call.arguments as Map<Object?, Object?>?);
+            }
+            if (call.method == 'getAvailableQualities') return <Object?>[];
+            return null;
+          });
+          mockControllerStream(19);
+          mockViewStream(416);
+
+          final controller = NativeVideoPlayerController(id: 19);
+          await flushSetup(controller);
+          await controller.onPlatformViewCreated(416, context);
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+
+          await controller.updateMediaInfo(
+            const NativeVideoPlayerMediaInfo(title: 'A'),
+          );
+          expect(mediaInfoCalls.last?['controllerId'], 19);
+          expect(mediaInfoCalls.last?['viewId'], 416);
+
+          await controller.releaseResources();
+          await controller.updateMediaInfo(
+            const NativeVideoPlayerMediaInfo(title: 'B'),
+          );
+          expect(mediaInfoCalls.last?['controllerId'], 19);
+          expect(mediaInfoCalls.last?.containsKey('viewId'), isFalse);
+          expect(
+            (mediaInfoCalls.last?['mediaInfo']
+                as Map<Object?, Object?>?)?['title'],
+            'B',
+          );
+
+          await controller.dispose();
+          expect(flutterErrors, isEmpty);
+        });
+      },
+    );
   });
 
   group('embedded caption text scale', () {
