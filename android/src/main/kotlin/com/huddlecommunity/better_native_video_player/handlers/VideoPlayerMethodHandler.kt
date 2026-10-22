@@ -7,11 +7,13 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.TrackSelectionOverride
@@ -351,10 +353,13 @@ if (player.currentMediaItem != null) {
 
         // Add metadata if provided
         if (mediaInfo != null) {
-            val metadataBuilder = androidx.media3.common.MediaMetadata.Builder()
+            val metadataBuilder = MediaMetadata.Builder()
             (mediaInfo["title"] as? String)?.let { metadataBuilder.setTitle(it) }
             (mediaInfo["subtitle"] as? String)?.let { metadataBuilder.setArtist(it) }
             (mediaInfo["album"] as? String)?.let { metadataBuilder.setAlbumTitle(it) }
+            (mediaInfo["artworkUrl"] as? String)?.takeIf { it.isNotEmpty() }?.let {
+                metadataBuilder.setArtworkUri(Uri.parse(it))
+            }
             mediaItemBuilder.setMediaMetadata(metadataBuilder.build())
         }
 

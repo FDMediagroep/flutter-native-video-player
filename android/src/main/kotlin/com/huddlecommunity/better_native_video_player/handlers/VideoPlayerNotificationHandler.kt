@@ -13,6 +13,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -166,6 +167,9 @@ class VideoPlayerNotificationHandler(
         (mediaInfo["title"] as? String)?.let { metadataBuilder.setTitle(it) }
         (mediaInfo["subtitle"] as? String)?.let { metadataBuilder.setArtist(it) }
         (mediaInfo["album"] as? String)?.let { metadataBuilder.setAlbumTitle(it) }
+        (mediaInfo["artworkUrl"] as? String)?.takeIf { it.isNotEmpty() }?.let {
+            metadataBuilder.setArtworkUri(Uri.parse(it))
+        }
 
         // Create updated MediaItem with new metadata
         val updatedItem = currentItem.buildUpon()
@@ -201,9 +205,9 @@ class VideoPlayerNotificationHandler(
         // Check if media info has actually changed to avoid unnecessary updates
         val artworkChanged = newArtworkUrl != currentArtworkUrl
         val mediaInfoChanged = newTitle != currentTitle ||
-            newSubtitle != currentSubtitle ||
-            newAlbum != currentAlbum ||
-            artworkChanged
+                newSubtitle != currentSubtitle ||
+                newAlbum != currentAlbum ||
+                artworkChanged
 
         // Store the new metadata
         currentTitle = newTitle
