@@ -741,7 +741,8 @@ class VideoPlayerMethodHandler(
         val args = call.arguments as? Map<*, *>
         sidecarSubtitleConfigs = parseSidecarSubtitleConfigs(args?.get("sidecarSubtitles") as? List<*>)
 
-        val mediaItem = lastMediaItem
+        // The shared player's item carries metadata updates made by sibling backends.
+        val mediaItem = player.currentMediaItem ?: lastMediaItem
         val dataSourceFactory = lastDataSourceFactory
         if (mediaItem == null || dataSourceFactory == null) {
             // Nothing loaded yet: the configs apply at the next load

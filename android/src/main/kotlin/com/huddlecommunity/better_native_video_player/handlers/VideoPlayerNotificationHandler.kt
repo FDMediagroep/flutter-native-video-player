@@ -306,6 +306,13 @@ class VideoPlayerNotificationHandler(
 
         // Start periodic position updates
         startPositionUpdates()
+
+        // Play/READY may have fired before this session existed; publish now.
+        handler.post {
+            if (shouldRefreshNotification()) {
+                updateNotification()
+            }
+        }
     }
 
     /**

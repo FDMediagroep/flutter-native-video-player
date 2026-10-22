@@ -206,7 +206,7 @@ extension VideoPlayerView {
     func applyUpdatedMediaInfo(_ mediaInfo: [String: Any]) {
         npLog("📱 Updating media info: \(mediaInfo["title"] ?? "Unknown")")
 
-currentMediaInfo = mediaInfo
+        currentMediaInfo = mediaInfo
         lastAppliedNowPlayingInfoKey = nil
         if lastAppliedArtworkUrl != (mediaInfo["artworkUrl"] as? String) {
             lastAppliedArtworkUrl = nil
@@ -214,10 +214,10 @@ currentMediaInfo = mediaInfo
 
         if let controllerIdValue = controllerId {
             SharedPlayerManager.shared.setMediaInfo(for: controllerIdValue, mediaInfo: mediaInfo)
-
+            
             for view in SharedPlayerManager.shared.findAllViewsForController(controllerIdValue)
-            where view !== self {
-view.currentMediaInfo = mediaInfo
+                    where view !== self {
+                view.currentMediaInfo = mediaInfo
                 view.lastAppliedNowPlayingInfoKey = nil
                 if view.lastAppliedArtworkUrl != (mediaInfo["artworkUrl"] as? String) {
                     view.lastAppliedArtworkUrl = nil
