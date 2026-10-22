@@ -164,6 +164,10 @@ class NativeVideoPlayerController {
   /// Safe to call before the platform view exists: the value is stored and
   /// applied when the player is created.
   Future<void> updateMediaInfo(NativeVideoPlayerMediaInfo mediaInfo) async {
+    if (_isDisposed) {
+      return;
+    }
+
     if (_mediaInfo == mediaInfo) {
       return;
     }
