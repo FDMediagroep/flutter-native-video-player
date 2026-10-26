@@ -26,6 +26,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionToken
+import com.huddlecommunity.better_native_video_player.listeners.SkipCommandsFilteringListener
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -49,7 +50,7 @@ class VideoPlayerNotificationHandler(
         private var sessionCounter = 0
 
         // The PiP window (and system media controls) show skip buttons for these.
-        private val SKIP_COMMANDS = intArrayOf(
+        val SKIP_COMMANDS = intArrayOf(
             Player.COMMAND_SEEK_TO_PREVIOUS,
             Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM,
             Player.COMMAND_SEEK_TO_NEXT,
@@ -73,13 +74,7 @@ class VideoPlayerNotificationHandler(
 
             override fun addListener(listener: Player.Listener) {
                 val forwardingListener = listeners.getOrPut(listener) {
-                    object : Player.Listener by listener {
-                        override fun onAvailableCommandsChanged(availableCommands: Player.Commands) {
-                            listener.onAvailableCommandsChanged(
-                                availableCommands.buildUpon().removeAll(*SKIP_COMMANDS).build()
-                            )
-                        }
-                    }
+                    SkipCommandsFilteringListener(listener)
                 }
                 super.addListener(forwardingListener)
             }
