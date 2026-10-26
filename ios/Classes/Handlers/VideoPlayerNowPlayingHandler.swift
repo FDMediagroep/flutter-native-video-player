@@ -146,7 +146,8 @@ extension VideoPlayerView {
         // metadata-only refresh (live stream track change) doesn't blank the
         // lock screen artwork while a redundant download runs.
         let artworkUrlString = mediaInfo["artworkUrl"] as? String
-        let reusableArtwork = artworkUrlString != nil && artworkUrlString == lastAppliedArtworkUrl
+        let reusableArtwork = RemoteCommandManager.shared.isOwner(viewId)
+             && artworkUrlString != nil && artworkUrlString == lastAppliedArtworkUrl
             ? MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPMediaItemPropertyArtwork]
             : nil
         if let reusableArtwork = reusableArtwork {
@@ -205,7 +206,7 @@ extension VideoPlayerView {
     func applyUpdatedMediaInfo(_ mediaInfo: [String: Any]) {
         npLog("📱 Updating media info: \(mediaInfo["title"] ?? "Unknown")")
 
-currentMediaInfo = mediaInfo
+        currentMediaInfo = mediaInfo
         lastAppliedNowPlayingInfoKey = nil
         if lastAppliedArtworkUrl != (mediaInfo["artworkUrl"] as? String) {
             lastAppliedArtworkUrl = nil
@@ -213,10 +214,10 @@ currentMediaInfo = mediaInfo
 
         if let controllerIdValue = controllerId {
             SharedPlayerManager.shared.setMediaInfo(for: controllerIdValue, mediaInfo: mediaInfo)
-
+            
             for view in SharedPlayerManager.shared.findAllViewsForController(controllerIdValue)
-            where view !== self {
-view.currentMediaInfo = mediaInfo
+                    where view !== self {
+                view.currentMediaInfo = mediaInfo
                 view.lastAppliedNowPlayingInfoKey = nil
                 if view.lastAppliedArtworkUrl != (mediaInfo["artworkUrl"] as? String) {
                     view.lastAppliedArtworkUrl = nil
@@ -227,7 +228,15 @@ view.currentMediaInfo = mediaInfo
         // Only push to Control Center when this view actually drives Now Playing;
         // an idle player must not hijack another app's lock screen. The stored
         // info is applied by the observer once playback starts.
-        if RemoteCommandManager.shared.isOwner(viewId) || (player?.rate ?? 0) > 0 {
+        // Route through the existing owner first: sibling views share the AVPlayer
+        // and would also pass the rate check, stealing ownership from it.
+        if RemoteCommandManager.shared.isOwner(viewId) {
+            setupNowPlayingInfo(mediaInfo: mediaInfo)
+        } else if let controllerIdValue = controllerId,
+                  let ownerView = SharedPlayerManager.shared.findAllViewsForController(controllerIdValue)
+            .first(where: { RemoteCommandManager.shared.isOwner($0.viewId) }) {
+            ownerView.setupNowPlayingInfo(mediaInfo: mediaInfo)
+        } else if (player?.rate ?? 0) > 0 {
             setupNowPlayingInfo(mediaInfo: mediaInfo)
         }
     }

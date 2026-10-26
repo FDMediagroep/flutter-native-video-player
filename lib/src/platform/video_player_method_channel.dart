@@ -295,14 +295,34 @@ class VideoPlayerMethodChannel {
   /// Replaces the Now Playing / media-notification metadata of the currently
   /// loaded item without interrupting playback. Keys absent from [mediaInfo]
   /// clear the corresponding field natively.
+  ///
+  /// Sends the controller ID too, so the native side can still update the
+  /// shared player's session after its last view is gone.
   Future<void> setMediaInfo(Map<String, dynamic> mediaInfo) async {
     try {
       await _methodChannel.invokeMethod<void>('setMediaInfo', <String, Object>{
         'viewId': primaryPlatformViewId,
+        'controllerId': ?controllerId,
         'mediaInfo': mediaInfo,
       });
     } catch (e) {
       debugPrint('Error calling setMediaInfo: $e');
+    }
+  }
+
+  /// [setMediaInfo] by controller ID alone, for a controller without a view
+  /// (after `releaseResources()`) whose native player may still be playing.
+  static Future<void> setMediaInfoForController(
+    int controllerId,
+    Map<String, dynamic> mediaInfo,
+  ) async {
+    try {
+      await const MethodChannel('native_video_player').invokeMethod<void>(
+        'setMediaInfo',
+        <String, Object>{'controllerId': controllerId, 'mediaInfo': mediaInfo},
+      );
+    } catch (e) {
+      debugPrint('Error calling setMediaInfo for controller $controllerId: $e');
     }
   }
 

@@ -7,11 +7,13 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.TrackSelectionOverride
@@ -98,6 +100,7 @@ class VideoPlayerMethodHandler(
     private val audioManager: AudioManager =
         context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null
+
     // Another app taking focus for good (the user resumed Spotify while our
     // video was paused) must end our claim: forget the request so nothing
     // holds or re-uses it, and the next play() asks again.
@@ -256,6 +259,7 @@ class VideoPlayerMethodHandler(
      */
     private fun handleSetMediaInfo(call: MethodCall, result: MethodChannel.Result) {
         val args = call.arguments as? Map<*, *>
+
         @Suppress("UNCHECKED_CAST")
         val mediaInfo = args?.get("mediaInfo") as? Map<String, Any>
 
@@ -267,7 +271,7 @@ class VideoPlayerMethodHandler(
         updateMediaInfo?.invoke(mediaInfo)
         // Without a loaded item there is nothing to re-tag; the stored info is
         // applied by the observer once playback starts.
-if (player.currentMediaItem != null) {
+        if (player.currentMediaItem != null) {
             notificationHandler.setupMediaSession(mediaInfo)
             lastMediaItem = player.currentMediaItem
         }
@@ -301,18 +305,24 @@ if (player.currentMediaItem != null) {
         }
 
         NpLog.d(TAG, "Loading video: $url (autoPlay: $autoPlay)")
-        NpLog.d(TAG, "Current player state - playbackState: ${player.playbackState}, duration: ${player.duration}, hasMedia: ${player.currentMediaItem != null}")
+        NpLog.d(
+            TAG,
+            "Current player state - playbackState: ${player.playbackState}, duration: ${player.duration}, hasMedia: ${player.currentMediaItem != null}"
+        )
 
         // Only send "loading" event if player is actually starting to load new media
         // Don't send if player is already in IDLE state with no media loaded
         // This prevents incorrect "loading" state when player is already idle
         // Check: STATE_IDLE means no media is loaded, and duration < 0 means C.TIME_UNSET (no duration)
         // Also check if player has a current media item - if not, it's truly idle with no media
-        val isPlayerIdleWithNoMedia = player.playbackState == Player.STATE_IDLE && 
-                                      player.duration < 0 && 
-                                      player.currentMediaItem == null
+        val isPlayerIdleWithNoMedia = player.playbackState == Player.STATE_IDLE &&
+                player.duration < 0 &&
+                player.currentMediaItem == null
         if (isPlayerIdleWithNoMedia) {
-            NpLog.d(TAG, "Player is already idle with no media (playbackState=${player.playbackState}, duration=${player.duration}, hasMedia=${player.currentMediaItem != null}), skipping loading event")
+            NpLog.d(
+                TAG,
+                "Player is already idle with no media (playbackState=${player.playbackState}, duration=${player.duration}, hasMedia=${player.currentMediaItem != null}), skipping loading event"
+            )
             // Don't send loading event - the initial state should have already sent "idle"
             // If initial state wasn't sent yet, it will be sent when EventChannel connects
         } else {
@@ -351,10 +361,13 @@ if (player.currentMediaItem != null) {
 
         // Add metadata if provided
         if (mediaInfo != null) {
-            val metadataBuilder = androidx.media3.common.MediaMetadata.Builder()
+            val metadataBuilder = MediaMetadata.Builder()
             (mediaInfo["title"] as? String)?.let { metadataBuilder.setTitle(it) }
             (mediaInfo["subtitle"] as? String)?.let { metadataBuilder.setArtist(it) }
             (mediaInfo["album"] as? String)?.let { metadataBuilder.setAlbumTitle(it) }
+            (mediaInfo["artworkUrl"] as? String)?.takeIf { it.isNotEmpty() }?.let {
+                metadataBuilder.setArtworkUri(Uri.parse(it))
+            }
             mediaItemBuilder.setMediaMetadata(metadataBuilder.build())
         }
 
@@ -441,11 +454,13 @@ if (player.currentMediaItem != null) {
                 // Send qualityChange event to notify Flutter that qualities are loaded
                 if (availableQualities.isNotEmpty()) {
                     val defaultQuality = availableQualities.first()
-                    eventHandler.sendEvent("qualityChange", mapOf(
-                        "url" to (defaultQuality["url"] ?: ""),
-                        "label" to (defaultQuality["label"] ?: "Auto"),
-                        "isAuto" to (defaultQuality["isAuto"] ?: true)
-                    ))
+                    eventHandler.sendEvent(
+                        "qualityChange", mapOf(
+                            "url" to (defaultQuality["url"] ?: ""),
+                            "label" to (defaultQuality["label"] ?: "Auto"),
+                            "isAuto" to (defaultQuality["isAuto"] ?: true)
+                        )
+                    )
                     NpLog.d(TAG, "Sent qualityChange event with ${availableQualities.size} available qualities")
                 }
             }
@@ -726,7 +741,8 @@ if (player.currentMediaItem != null) {
         val args = call.arguments as? Map<*, *>
         sidecarSubtitleConfigs = parseSidecarSubtitleConfigs(args?.get("sidecarSubtitles") as? List<*>)
 
-        val mediaItem = lastMediaItem
+        // The shared player's item carries metadata updates made by sibling backends.
+        val mediaItem = player.currentMediaItem ?: lastMediaItem
         val dataSourceFactory = lastDataSourceFactory
         if (mediaItem == null || dataSourceFactory == null) {
             // Nothing loaded yet: the configs apply at the next load
@@ -849,11 +865,13 @@ if (player.currentMediaItem != null) {
                 .setMaxVideoBitrate(Int.MAX_VALUE)
                 .build()
 
-            eventHandler.sendEvent("qualityChange", mapOf(
-                "url" to (qualityInfo["url"] as? String ?: ""),
-                "label" to (qualityInfo["label"] as? String ?: "Auto"),
-                "isAuto" to true
-            ))
+            eventHandler.sendEvent(
+                "qualityChange", mapOf(
+                    "url" to (qualityInfo["url"] as? String ?: ""),
+                    "label" to (qualityInfo["label"] as? String ?: "Auto"),
+                    "isAuto" to true
+                )
+            )
             result.success(null)
         } else {
             val width = (qualityInfo["width"] as? Number)?.toInt()
@@ -872,11 +890,13 @@ if (player.currentMediaItem != null) {
                 }
                 .build()
 
-            eventHandler.sendEvent("qualityChange", mapOf(
-                "url" to (qualityInfo["url"] as? String ?: ""),
-                "label" to (qualityInfo["label"] as? String ?: ""),
-                "isAuto" to false
-            ))
+            eventHandler.sendEvent(
+                "qualityChange", mapOf(
+                    "url" to (qualityInfo["url"] as? String ?: ""),
+                    "label" to (qualityInfo["label"] as? String ?: ""),
+                    "isAuto" to false
+                )
+            )
             result.success(null)
         }
     }
@@ -1118,12 +1138,14 @@ if (player.currentMediaItem != null) {
 
                 player.trackSelectionParameters = newParameters
 
-                eventHandler.sendEvent("subtitleChange", mapOf(
-                    "index" to -1,
-                    "language" to "off",
-                    "displayName" to "Off",
-                    "isSelected" to false
-                ))
+                eventHandler.sendEvent(
+                    "subtitleChange", mapOf(
+                        "index" to -1,
+                        "language" to "off",
+                        "displayName" to "Off",
+                        "isSelected" to false
+                    )
+                )
 
                 result.success(null)
                 return
@@ -1180,12 +1202,14 @@ if (player.currentMediaItem != null) {
 
             NpLog.d(TAG, "📝 Selected subtitle track: $selectedDisplayName ($selectedLanguage)")
 
-            eventHandler.sendEvent("subtitleChange", mapOf(
-                "index" to index,
-                "language" to selectedLanguage,
-                "displayName" to selectedDisplayName,
-                "isSelected" to true
-            ))
+            eventHandler.sendEvent(
+                "subtitleChange", mapOf(
+                    "index" to index,
+                    "language" to selectedLanguage,
+                    "displayName" to selectedDisplayName,
+                    "isSelected" to true
+                )
+            )
 
             result.success(null)
         } catch (e: Exception) {

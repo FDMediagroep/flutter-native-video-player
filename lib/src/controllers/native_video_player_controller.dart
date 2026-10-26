@@ -165,12 +165,22 @@ class NativeVideoPlayerController {
   /// Safe to call before the platform view exists: the value is stored and
   /// applied when the player is created.
   Future<void> updateMediaInfo(NativeVideoPlayerMediaInfo mediaInfo) async {
-    if (_mediaInfo == mediaInfo) {
+    if (_isDisposed) {
       return;
     }
 
+    // Not deduplicated: other controllers with this ID may have changed the
+    // shared native player's metadata since.
     _mediaInfo = mediaInfo;
-    await _methodChannel?.setMediaInfo(mediaInfo.toMap());
+    final VideoPlayerMethodChannel? channel = _methodChannel;
+    if (channel != null) {
+      await channel.setMediaInfo(mediaInfo.toMap());
+    } else {
+      await VideoPlayerMethodChannel.setMediaInfoForController(
+        id,
+        mediaInfo.toMap(),
+      );
+    }
   }
 
   /// Whether Picture-in-Picture mode is allowed
